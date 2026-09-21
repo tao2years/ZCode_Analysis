@@ -18,6 +18,7 @@
 - 写入 index、Overview、synthesis、证据台账和 Skill 首次试用记录。
 - 完成 A1/A2 与 B1–B5 七篇专题，覆盖会话恢复、权限与超时、reactive compact、Memory extraction/并发、大结果完整性及上下文全貌。
 - 更正 B4 对 Bash 执行输出的过度概括：POSIX Bash merged-output 由子进程直接写文件，pipe 路径才由 OutputCollector 采集；详见 E26。
+- 根据用户追问，B5 增补 Microcompact 的逐层持久边界、model-io JSONL 与权威 transcript 的区别，以及 `ReadSessionContext` 跨会话按需读取；证据见 E28、E29。同步更新 Overview、synthesis、index 和 Skill 的问题库/模板/证据标准。
 
 ## 已确定结论
 
@@ -26,12 +27,14 @@
 - 合格工具可在模型流中提前执行；已读汇合点按 ID 合并并按原调用列表取回。
 - 无工具调用不必然结束 turn；guide/Stop Hook 可以续跑。
 - 模型请求由 runtime entries 投影；UI 内容不能代表模型实际输入。
+- Microcompact 清理 canonical 运行时历史与当轮 request entries，不回写持久 Session tool part；默认边界 event 不作为冷恢复重放依据。JSONL model-io 有自己的缩减与轮转规则，不能充当权威 Session 备份。
+- `#sess_*` 只触发提示，`ReadSessionContext` 才按需读取其他 Session；Project Memory 是独立的 workspace 文件记忆；`CompactTrigger.SessionMemory` 在核心实现中只看到映射分支，未见生产发起点。
 
 ## 待继续的源码问题
 
 1. Provider retry、reasoning 兼容及增量 tool-call 的 adapter 契约；只从当前源码能证明的边界陈述。
 2. task index、event store、owner/lease 与跨 Host 路由的系统设计，以及它们与 A/B 的关系。
-3. 子 Agent、Hooks、Skills 等扩展机制如何沿用或改变会话、权限、上下文契约。
+3. 子 Agent、Hooks、Skills 等扩展机制如何沿用或改变会话、权限、上下文契约；包括 `ReadSessionContext` 的跨会话权限边界与 subagent persistent memory 的相互关系。
 4. 外部 Provider 精确 token/cache 行为、仓库外 artifact 清理及具体远端部署路径无法由当前源码单独证明，作为证据边界保留，不视为本批未完成。
 
 ## 验证和环境
@@ -44,11 +47,20 @@
 - `node --import tsx --test packages/services/test/nonCliAcpRetirement.test.ts` 通过 5/5。其中 Project Memory 用例只支持服务层目录/文件可读；另一个用例支持 Desktop 与 replayable 的当前会话恢复投影，不覆盖 CLI Memory extraction、compact、工具调度或大输出链路。
 - 仓库未提供统一 `test` script；源码检索未发现直接覆盖本批 CLI 核心机制的测试文件。
 - 尚未运行目标应用或真实 Provider。
+- 本轮文档/Skill 修订验证：`quick_validate.py` 在 `PYTHONUTF8=1` 下通过；更新文档的本地 Markdown 链接检查通过；`git diff --check` 通过；使用仓库固定版本 `corepack pnpm typecheck` 通过、`corepack pnpm lint` 退出 0（70 条既有 warning、0 error）。直接 `pnpm` 命中了宿主 pnpm 11 并因依赖目录版本不一致拒绝无 TTY 自动清理，随后改用项目锁定的 pnpm 10.33.2 成功；没有执行依赖清理。
+- 本轮 Mermaid 直接 Node API 解析受 DOMPurify 的 Node DOM 初始化错误阻挡；所改主图只调整节点文案，不改箭头与语法结构。本轮不将它写成已重新渲染验证。
 - 中断前已有两个只读研究子任务分别核对 CLI runtime 与 Host 链；主研究者已抽查其关键源码定位并合并。它们未修改文件。
 
 ## 下一步
 
 1. 本批指定的六项补充已收束；若继续扩展，选择 owner/lease、Provider adapter 或子 Agent 中一个独立专题。
 2. 新专题完成时复用现有全景和证据编号，并回写 Overview 与工程借鉴。
+
+## 跨设备 handoff（2026-09-21）
+
+- 本轮用户追问的两点：Microcompact 是否修改持久 transcript/JSONL；上下文全貌是否漏掉 Session memory。答案已落在 [B5](../topics/b-context-management.md) 的 00–01、02；E28/E29 记录了证据边界。此轮只做静态研究和文档/Skill 修订，未启动目标 Agent 或 Provider。
+- 当前源码研究基线仍是 `872ad960de7ec172591f7e1952f7849229f94521`。研究文件与 Skill 版本以本次推送的 Git commit 为准；后续设备先 fetch/pull，再运行 `node scripts/check-workspace-freshness.mjs`，检查 `git status --short` 和基线差异。
+- 继续提问时从 [index](../index.md) 进入，先读相关专题和 E28/E29，再按问题追上下游。若涉及新事实，更新同一专题、证据、Overview/index 和 Skill 中确实需要改变的规则；避免重新做完整研究访谈。
+- 仍待验证：自定义 eventStore 的具体持久行为、真实 Provider token/cache 表现、外部调用者是否使用 `CompactTrigger.SessionMemory`。当前结论只限已追踪核心生产路径。
 
 恢复时先运行 freshness、检查 `git diff -- research/code-agent skill-drafts`，确认源码基线是否变化。

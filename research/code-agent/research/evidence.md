@@ -258,3 +258,23 @@
 - `apps/zcode-cli/packages/core/src/runtime/methods/context-usage.ts:119-254`：usage breakdown 将 schema 单独统计，并明确估算置信度。
 
 支持：[B5](../topics/b-context-management.md)。限制：不证明最终 Provider tokenizer 计数或实际 prompt cache 命中。
+
+## E28：Microcompact 的持久边界与诊断 JSONL
+
+- `apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts:73-102`：替换 canonical MessageHistory 和当前 request entries，发 MicrocompactBoundary event；没有保存修改后的 Session tool part。
+- `apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts:286-345`：工具完成时持久化原 tool part output/媒体元数据。
+- `apps/zcode-cli/packages/core/src/runtime/methods/events.ts:81-108,263-280,420-423`：事件先进入 eventStore；durable Session 分支不包含 MicrocompactBoundary。默认 eventStore 创建见 `apps/zcode-cli/packages/bootstrap/src/app/create-app.ts:727-731`。
+- `apps/zcode-cli/packages/core/src/runtime/methods/resume.ts:91-174` 与 `agent/session-history-hydrator.ts:149-178`：冷恢复从 SessionStore 消息 hydrate tool result，没有回放 microcompact event；完整 compact boundary 仍会限制有效历史。
+- `apps/zcode-cli/packages/adapters/src/storage/session-store.ts:1-6`、`model/runner-debug.ts:34-46,470-535,627-755`：权威 SessionStore 使用 SQLite；model-io JSONL 是另一路有界、可轮转/缩减的请求诊断记录。
+
+支持：[B5](../topics/b-context-management.md) 的逐层可见性。限制：这是当前默认组合和已追踪生产路径的静态结论；自定义注入的 eventStore 可有不同持久性，诊断日志是否仍含某次原文取决于记录时机与保留策略。
+
+## E29：三种 Session 相关上下文入口
+
+- `apps/zcode-cli/packages/core/src/session-context/references.ts:5-27` 与 `runtime/methods/turn.ts:863-872`：真实用户输入出现 `#sess_*` 时附加读取提醒，但不自动展开旧 Session。
+- `apps/zcode-cli/packages/core/src/tool/handlers/read-session-context.ts:38-143,146-179,215-320`：按 sessionId 读取另一 Session 的持久消息，按 query/strategy/预算选取；可调用独立轻量模型提取，失败回退本地内容。
+- `apps/zcode-cli/packages/core/src/session-context/read-session-context.ts:54-100,241-330`：先按 active branch/compact boundary 选历史，再评分、分块和限额。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/project-memory.ts:5-28`、`runtime/helpers/project-memory-extraction.ts:32-80`：Project Memory 是 workspace 作用域的文件式长期事实与后台提取，独立于跨 Session transcript 读取。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:40-63`：`CompactTrigger.SessionMemory` 仅见 phase/reason 映射；对 core 生产调用点的检索未发现该 trigger 的发起者，不能据枚举宣称已启用会话记忆压缩。
+
+支持：[B5](../topics/b-context-management.md) 对当前会话恢复、跨 Session 读取和 Project Memory 的区分。限制：缺少外部插件或未来调用者的证明，未运行目标 Agent/Provider。

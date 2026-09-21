@@ -28,6 +28,8 @@ ZCode 的核心并不是一个孤立的“模型—工具 while loop”，而是
 
 专题确认了 Context 是每步投影产物：持久 messages、runtime entries、Provider-neutral messages 与 wire 各有变换。完整 compact 以 summary + boundary 表达 active history，保留最近轮并支持冷恢复；reactive compact 在一次被拒绝的 model step 上替换请求状态后重试。Memory 只自动加载 index，事实按需读取；后台提取是受限 Agent，文件 revision 检查提供乐观防护而非跨 Runtime 事务。工具大输出既有 POSIX Bash 直接写文件路径，也有 pipe collector，再经过通用 result budget；只有仍被保存且可读的字节才能恢复。详见 [B1](topics/b-message-context-and-provider-input.md)、[B5](topics/b-context-management.md)、[B2](topics/b-compaction.md)、[B3](topics/b-memory.md)、[B4](topics/b-large-tool-results.md)。
 
+补充的持久边界是：Microcompact 保留 Session 原工具结果，只清运行时可见内容；边界事件本身不是冷恢复重放源。另一 Session 的背景由 `ReadSessionContext` 显式按需提取，不等于当前 Session 的恢复，也不等于 Project Memory。诊断 JSONL 可能保留某些历史请求，但有轮转、缩减和脱敏规则，不能作为无损 transcript。详见 [B5](topics/b-context-management.md)。[E28、E29]
+
 ## 后续专题顺序
 
 在 A/B 之后，建议按发现选择：
