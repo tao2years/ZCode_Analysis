@@ -11,7 +11,7 @@ sequenceDiagram
     participant UI as Renderer / client
     participant CI as V4 CommandInbox
     participant RT as AgentRuntime admission
-    participant LOOP as Turn loop
+    participant TURN as Turn execution
     participant MODEL as Model adapter
     participant TOOL as Tool pipeline
     participant STORE as Session store / events
@@ -20,20 +20,20 @@ sequenceDiagram
     CI->>CI: exact lookup + per-session gate
     CI->>RT: send/guide/queue/cancel intent
     RT->>RT: reserve turn or enqueue deferred input
-    RT->>LOOP: foreground runtime command
-    LOOP->>STORE: persist user/turn facts
+    RT->>TURN: foreground runtime command
+    TURN->>STORE: persist user/turn facts
     loop one or more model steps
-        LOOP->>MODEL: messages + tools + step config
-        MODEL-->>LOOP: text/reasoning/tool calls/finish
+        TURN->>MODEL: messages + tools + step config
+        MODEL-->>TURN: text/reasoning/tool calls/finish
         alt tool calls
-            LOOP->>TOOL: schedule and execute
-            TOOL-->>LOOP: one closed result per call
+            TURN->>TOOL: schedule and execute
+            TOOL-->>TURN: one closed result per call
         else guide or Stop Hook requests continuation
-            LOOP->>LOOP: append steering/continuation input
+            TURN->>TURN: append steering/continuation input
         end
     end
-    LOOP->>STORE: assistant facts + TurnComplete
-    LOOP-->>RT: TurnResult
+    TURN->>STORE: assistant facts + TurnComplete
+    TURN-->>RT: TurnResult
     RT-->>CI: settle command ack
     CI-->>UI: projection/ack
 ```
