@@ -1,0 +1,3 @@
+interface:
+  display_name: "Code Agent 源码深度研究"
+  short_description: "还原 Code Agent 端到端运行模型，深入机制与设计取舍，维护增量研究"
