@@ -122,7 +122,13 @@
 
 ## Microcompact / Reactive Compact 汇报材料（2026-09-22）
 
-- 用户要求独立的 PPT 前置报告，对比 ZCode 与其自研方案：自研 Microcompact 在 40%/60% 进行两级**部分**工具结果裁剪；自研 Reactive 先最多三轮裁剪历史工具结果，仍超窗才压缩前一轮正常消息并拼回本轮增量。报告和两张 16:9 图位于 [briefing](../briefings/microcompact-reactive-comparison.md)，可编辑源是同目录 HTML。ZCode 一侧按当前源码核验，自研一侧只记录用户方案，具体算法和实现待核验。
+- 用户要求独立的 PPT 前置报告，对比 ZCode 与其自研方案：自研 Microcompact 在 40%/60% 进行两级**部分**工具结果裁剪；自研 Reactive 先最多三轮裁剪历史工具结果，仍超窗才压缩前一轮正常消息并拼回本轮增量。报告和两张 16:9 图位于 [briefing](../briefings/microcompact-reactive-comparison.md)，可编辑源是同目录 HTML。ZCode 实现依据源码，自研设计规则与设计推论在报告中分别陈述。
 - 特别纠偏：“双方兜底一致”只成立于抽象目标。ZCode Reactive 从当前失败请求的 active entries 选旧组摘要、保留近期组，并重试同一模型步骤；没有显式回滚到上一轮成功 Provider 请求后再拼增量，也没有 Reactive 内的三轮工具结果裁剪。图与报告均保持该差异，避免 PPT 误传。
 - 此次只新增文档、HTML 和导出图片，未修改目标产品代码或启动目标 Agent/Provider。后续若取得自研源码，应核对 40%/60% 分母、软/硬裁剪片段算法、三轮的验证单位、正常消息版本与增量包含范围，再把“方案描述”升级为“实现确认”。
 - 验证：报告相对链接检查覆盖 15 个研究 Markdown 文件，0 个断链；可编辑 HTML 在本机 Chrome 以 1600×900 分别导出两张 PNG，两个页面节点均未超出画布，并已目视检查；`git diff --check` 与按仓库脚本参数运行的本地 `tsc -b` 通过，`oxlint --quiet` 退出 0（70 个既有 warning、0 error）。上述验证只涉及文档/渲染/仓库静态检查。
+
+## 汇报材料粒度与视觉修订（2026-09-22）
+
+- 用户进一步确定自研方案的完整两档规则：Runtime 周期 flag、40%/60% 各执行一次及成功 compact 后重置；只裁 completed turns 中的旧只读/搜索工具结果；Soft 保护最近 12 个 user turns、单结果超过 4,000 字符时留头尾各 1,500；Hard 保护最近 8 个 turns、超过 1,000 字符时留头部 1,000；原始 transcript 与工具配对结构保留。Reactive 每轮根据超额量裁剪后重新请求 Provider，最多三轮，再使用旧历史摘要加本轮增量兜底。
+- 报告已增加 ZCode 可复算算法、Reactive 选组数字例子、自研周期状态与裁剪算子、跨表示状态表和算术边界；两张图改为浅色、表格化的学术汇报风格。避免把报告正文也压成 PPT 密度，避免反复出现“用户描述/待检查”标签；同时不把缺少依据的性能收益写成结果。
+- 两张 1600×900 浅色图已在 Chrome 中重新导出并目视检查，页面内容没有超出画布；研究目录 15 个 Markdown 文件的本地链接检查无断链。按 `package.json` 参数执行的 `tsc -b` 通过，`oxlint --quiet` 退出 0（70 个既有 warning、0 error），`git diff --check` 通过。仍未运行目标 Agent 或 Provider。

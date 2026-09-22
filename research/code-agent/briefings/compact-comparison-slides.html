@@ -3,106 +3,85 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Microcompact / Reactive Compact 对比</title>
+  <title>上下文压缩策略的机制比较</title>
   <style>
-    :root { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif; color: #eef3fb; background: #08111f; }
+    :root { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif; color: #1d2b36; background: #fff; }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
     body { width: 1600px; }
-    .slide { width: 1600px; height: 900px; position: relative; overflow: hidden; padding: 58px 76px 42px; background: radial-gradient(circle at 92% -8%, #1d3760 0, transparent 35%), #0b1423; border-bottom: 2px solid #26364c; }
-    .slide::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: #38bdf8; }
-    .slide.two::before { background: #fb9474; }
-    .eyebrow { color: #7cd3f8; font-size: 18px; font-weight: 700; letter-spacing: .12em; margin: 0 0 16px; }
-    .two .eyebrow { color: #ffab8d; }
-    h1 { margin: 0; font-size: 47px; line-height: 1.2; letter-spacing: -.025em; }
-    .subtitle { color: #b3c2d7; font-size: 21px; line-height: 1.45; margin: 17px 0 30px; }
-    .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-    .lane { border: 1px solid #314761; border-radius: 19px; background: rgba(16, 29, 47, .94); padding: 26px 26px 22px; min-height: 475px; }
-    .lane.ours { border-color: #735746; background: rgba(34, 30, 34, .90); }
-    .lane-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-    .label { font-size: 27px; font-weight: 800; }
-    .tag { font-size: 15px; color: #a7dffd; border: 1px solid #2c7094; background: #102c42; border-radius: 999px; padding: 7px 13px; }
-    .ours .tag { color: #ffc0a4; border-color: #a4664e; background: #402c2a; }
-    .steps { display: grid; gap: 13px; }
-    .step { display: grid; grid-template-columns: 90px 1fr; gap: 14px; align-items: center; border-radius: 12px; background: #16263a; padding: 15px 17px; min-height: 91px; }
-    .ours .step { background: #322b2f; }
-    .step .key { color: #7dd3fc; font-size: 17px; font-weight: 800; }
-    .ours .step .key { color: #ffb297; }
-    .step strong { display: block; font-size: 22px; line-height: 1.32; }
-    .step span { display: block; color: #b3c2d7; font-size: 16px; line-height: 1.42; margin-top: 4px; }
-    .arrow { color: #6289a6; text-align: center; font-size: 21px; line-height: .6; }
-    .ours .arrow { color: #a67864; }
-    .insight { margin-top: 22px; border-radius: 15px; border: 1px solid #3b526b; background: #132238; display: flex; align-items: center; gap: 25px; padding: 19px 24px; }
-    .insight .head { font-size: 17px; color: #8cd8fb; font-weight: 800; letter-spacing: .08em; white-space: nowrap; }
-    .insight .body { font-size: 22px; font-weight: 650; line-height: 1.35; }
-    .two .insight { background: #2a232d; border-color: #765544; }
-    .two .insight .head { color: #ffb394; }
-    .foot { position: absolute; bottom: 18px; left: 76px; right: 76px; color: #91a2b8; font-size: 14px; display: flex; justify-content: space-between; }
-    .two .lane { min-height: 480px; }
-    .two .step { min-height: 84px; padding-top: 12px; padding-bottom: 12px; }
-    .two .subtitle { margin-bottom: 25px; }
-    .two .insight { margin-top: 18px; }
+    .slide { width: 1600px; height: 900px; overflow: hidden; position: relative; padding: 56px 72px 36px; background: #fff; border-bottom: 1px solid #cfd7dd; }
+    .kicker { color: #34647d; font-size: 17px; letter-spacing: .08em; font-weight: 700; margin-bottom: 11px; }
+    h1 { margin: 0; font-size: 40px; line-height: 1.23; font-weight: 750; letter-spacing: -.015em; }
+    .subtitle { color: #52636e; font-size: 20px; line-height: 1.45; margin: 15px 0 27px; }
+    .head-rule { width: 100%; height: 2px; background: #d0dbe2; margin-bottom: 0; }
+    .matrix { display: grid; grid-template-columns: 148px 1fr 1fr; border: 1px solid #ccd6dc; border-top: 0; }
+    .matrix > div { padding: 15px 17px; border-right: 1px solid #d7dfe4; border-bottom: 1px solid #d7dfe4; }
+    .matrix > div:nth-child(3n) { border-right: 0; }
+    .matrix > div:nth-last-child(-n+3) { border-bottom: 0; }
+    .matrix .col-head { background: #f1f5f7; padding: 15px 18px; font-size: 23px; font-weight: 750; }
+    .matrix .col-head.z { color: #235b79; }
+    .matrix .col-head.o { color: #985335; }
+    .matrix .row-head { background: #f7f9fa; font-size: 19px; font-weight: 700; color: #344b58; display: flex; align-items: center; }
+    .matrix .cell { min-height: 114px; display: flex; flex-direction: column; justify-content: center; font-size: 20px; line-height: 1.34; }
+    .matrix .cell strong { font-size: 21px; font-weight: 750; }
+    .matrix .cell small { color: #52636e; font-size: 17px; line-height: 1.33; margin-top: 5px; }
+    .note { display: grid; grid-template-columns: 120px 1fr; align-items: start; gap: 15px; border-left: 4px solid #487b96; background: #f2f6f8; margin-top: 20px; padding: 16px 19px; font-size: 20px; line-height: 1.35; }
+    .note .label { color: #2b607c; font-weight: 750; }
+    .slide.two .note { border-left-color: #a46442; background: #faf5f1; }
+    .slide.two .note .label { color: #915032; }
+    .foot { position: absolute; bottom: 18px; left: 72px; right: 72px; display: flex; justify-content: space-between; color: #6c7b84; font-size: 14px; }
+    .two .matrix .cell { min-height: 116px; }
+    .two .subtitle { margin-bottom: 23px; }
+    .number { color: #61849a; font-weight: 800; margin-right: 5px; }
   </style>
 </head>
 <body>
-  <section class="slide one" id="microcompact-slide" aria-label="Microcompact 比较">
-    <div class="eyebrow">01 / 请求前：MICROCOMPACT</div>
-    <h1>同样减少上下文占用，信息损失粒度不同</h1>
-    <p class="subtitle">ZCode 清掉整条较旧工具结果；我们的方案在 40% / 60% 压力点分级保留结果片段。</p>
-    <div class="lanes">
-      <div class="lane">
-        <div class="lane-head"><div class="label">ZCode</div><div class="tag">源码确认 · 常规配置默认关闭</div></div>
-        <div class="steps">
-          <div class="step"><div class="key">触发</div><div><strong>空闲 &gt; 60 分钟，或接近 Auto 门槛</strong><span>默认微压缩阈值 = min(自动压缩阈值 × 90%，该阈值 − 2,000 token)</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">选择</div><div><strong>从旧到新扫描合格工具结果</strong><span>按工具调用批次分组；最近 5 组合格结果保持原文</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">动作</div><div><strong>整条结果替换为固定占位符</strong><span>不留 preview；总节省不足 256 token 则整次撤销</span></div></div>
-        </div>
-      </div>
-      <div class="lane ours">
-        <div class="lane-head"><div class="label">我们的方案</div><div class="tag">按用户描述 · 实现待核验</div></div>
-        <div class="steps">
-          <div class="step"><div class="key">触发</div><div><strong>40% 软裁剪 → 60% 硬裁剪</strong><span>占用率分母、估算时点及阈值回退规则待确认</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">选择</div><div><strong>历史工具结果分级处理</strong><span>两级各自的候选、优先级与近期保护范围待核验</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">动作</div><div><strong>部分裁剪，保留结果片段</strong><span>不是整条清空；软/硬具体保留算法待核验</span></div></div>
-        </div>
-      </div>
+  <section class="slide one" id="microcompact-slide" aria-label="图一 Microcompact 比较">
+    <div class="kicker">图 1　请求前治理 / MICROCOMPACT</div>
+    <h1>两种微压缩策略的核心差别：结果全文替换与分级部分裁剪</h1>
+    <p class="subtitle">比较触发、候选选择、内容变换与状态提交；两侧百分比属于不同的阈值定义，不能直接相减。</p>
+    <div class="head-rule"></div>
+    <div class="matrix">
+      <div class="col-head"></div><div class="col-head z">ZCode</div><div class="col-head o">自研方案</div>
+      <div class="row-head">触发</div>
+      <div class="cell"><strong>空闲 &gt; 60 分钟，或估算量 E ≥ M</strong><small>M = min(完整 Auto 门槛 × 90%，该门槛 − 2,000 token)；清理开关需开启。</small></div>
+      <div class="cell"><strong>压力 ≥ 40%：Soft；≥ 60%：Hard</strong><small>每档每周期最多一次；首次达到 60% 可同一请求执行两档。</small></div>
+      <div class="row-head">候选</div>
+      <div class="cell"><strong>从旧到新扫描合格工具结果</strong><small>按 assistant 工具调用分组；最近 5 组合格结果保留原文。</small></div>
+      <div class="cell"><strong>已完成 turn 的旧只读/搜索结果</strong><small>Soft 保护最近 12 个 user turns；Hard 保护最近 8 个。</small></div>
+      <div class="row-head">内容变换</div>
+      <div class="cell"><strong>整条 content → 固定占位符</strong><small>不保留头尾片段、预览或摘要；工具调用 ID 与参数不变。</small></div>
+      <div class="cell"><strong>Soft：&gt;4,000 字符留头尾各 1,500<br>Hard：&gt;1,000 字符留头部 1,000</strong><small>提示说明省略字符数；不清空 tool result block。</small></div>
+      <div class="row-head">提交</div>
+      <div class="cell"><strong>至少节省 256 token 才提交</strong><small>只改活跃 Runtime 历史；持久 Session tool part 不改。</small></div>
+      <div class="cell"><strong>原始 transcript 保留</strong><small>成功 compact 重置 Soft/Hard 标志，失败不重置。</small></div>
     </div>
-    <div class="insight"><div class="head">核心取舍</div><div class="body">ZCode 释放空间更直接；我们的分级裁剪保留更多证据，但释放量取决于具体算法。</div></div>
-    <div class="foot"><span>ZCode：microcompact.ts / runtime microcompact.ts；用户方案：本次口述</span><span>静态机制对比 · 非性能实测</span></div>
+    <div class="note"><span class="label">机制结论</span><span>ZCode 以整条替换回收空间；自研方案以两级保护窗口和头/尾保留量控制信息损失。</span></div>
+    <div class="foot"><span>ZCode 源码：compact/microcompact.ts、runtime/methods/microcompact.ts</span><span>上下文压缩机制比较 · 1 / 2</span></div>
   </section>
 
-  <section class="slide two" id="reactive-slide" aria-label="Reactive Compact 比较">
-    <div class="eyebrow">02 / PROVIDER 超窗后：REACTIVE COMPACT</div>
-    <h1>先挽救工具证据，还是直接摘要旧历史？</h1>
-    <p class="subtitle">两条路径都希望让当前任务继续；ZCode 从失败请求直接做摘要，我们先尝试局部裁剪。</p>
-    <div class="lanes">
-      <div class="lane">
-        <div class="lane-head"><div class="label">ZCode</div><div class="tag">源码确认</div></div>
-        <div class="steps">
-          <div class="step"><div class="key">01</div><div><strong>Provider 报 context exceeded</strong><span>检查一次性尝试标志、快速回填保护和历史是否足够</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">02</div><div><strong>从当前失败请求选旧组做摘要</strong><span>至少保留最近一组原文；不先执行三轮工具裁剪</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">03</div><div><strong>提交摘要与边界，重试同一模型步骤</strong><span>该步骤再超窗，不无限重复 Reactive</span></div></div>
-        </div>
-      </div>
-      <div class="lane ours">
-        <div class="lane-head"><div class="label">我们的方案</div><div class="tag">按用户描述 · 实现待核验</div></div>
-        <div class="steps">
-          <div class="step"><div class="key">01</div><div><strong>Provider 报超窗 → 裁剪历史工具结果</strong><span>最多三轮；每轮的容量判定方式待核验</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">02</div><div><strong>仍超窗 → 压缩前一轮正常消息</strong><span>明确成功边界与摘要输入，避免重复或遗漏增量</span></div></div>
-          <div class="arrow">↓</div>
-          <div class="step"><div class="key">03</div><div><strong>拼回本轮增量，再验证/重试</strong><span>兜底后仍超窗的最终处理待核验</span></div></div>
-        </div>
-      </div>
+  <section class="slide two" id="reactive-slide" aria-label="图二 Reactive Compact 比较">
+    <div class="kicker">图 2　Provider 超窗后 / REACTIVE COMPACT</div>
+    <h1>恢复路径的差别：直接摘要旧轮，或先分轮裁剪工具结果</h1>
+    <p class="subtitle">两者都希望保留当前任务的连续性，但失败请求如何重建、何时调用摘要模型并不相同。</p>
+    <div class="head-rule"></div>
+    <div class="matrix">
+      <div class="col-head"></div><div class="col-head z">ZCode</div><div class="col-head o">自研方案</div>
+      <div class="row-head"><span class="number">01</span> 超窗</div>
+      <div class="cell"><strong>普通模型请求被 Provider 拒绝</strong><small>检查一次性恢复标志、快速回填保护与可摘要历史。</small></div>
+      <div class="cell"><strong>普通模型请求被 Provider 拒绝</strong><small>先进入历史工具结果的局部治理。</small></div>
+      <div class="row-head"><span class="number">02</span> 第一响应</div>
+      <div class="cell"><strong>当前失败请求 → 旧轮摘要</strong><small>按 assistant-started rounds 分组；最近至少一组保持原文。</small></div>
+      <div class="cell"><strong>超额量驱动工具裁剪，最多三轮</strong><small>每轮裁剪后重新请求 Provider，以反馈决定是否继续。</small></div>
+      <div class="row-head"><span class="number">03</span> 兜底</div>
+      <div class="cell"><strong>摘要请求可重选旧 / 新组边界</strong><small>若摘要自身超窗，缩小摘要输入；Reactive 不丢最旧组。</small></div>
+      <div class="cell"><strong>三轮仍超窗 → 压缩前一轮正常消息</strong><small>随后拼回本轮增量消息，构成新的当前请求。</small></div>
+      <div class="row-head"><span class="number">04</span> 续跑</div>
+      <div class="cell"><strong>提交摘要与边界，重试同一 model step</strong><small>再次超窗不无限重复本步骤的 Reactive 完整压缩。</small></div>
+      <div class="cell"><strong>用“旧摘要 + 本轮增量”继续任务</strong><small>把工具结果局部裁剪置于摘要之前。</small></div>
     </div>
-    <div class="insight"><div class="head">关键澄清</div><div class="body">共同目标是“摘要旧历史 + 保留近期任务”；ZCode 没有显式回退到上一轮成功请求再拼增量。</div></div>
-    <div class="foot"><span>ZCode：turn-model-step.ts / compact.ts / compact-selection.ts；用户方案：本次口述</span><span>机制对比 · 可靠性待回放验证</span></div>
+    <div class="note"><span class="label">关键界限</span><span>ZCode 从<strong>当前失败请求</strong>分组摘要；它没有显式回退到上一轮成功请求后再拼接本轮增量。</span></div>
+    <div class="foot"><span>ZCode 源码：turn-model-step.ts、runtime/methods/compact.ts、helpers/compact-selection.ts</span><span>上下文压缩机制比较 · 2 / 2</span></div>
   </section>
 </body>
 </html>
