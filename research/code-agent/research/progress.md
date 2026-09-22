@@ -119,3 +119,10 @@
 - `# Harness` 是默认/工作流身份的模型指令，权限、Hook、并行由各自代码路径实现；自定义 system prompt 跳过默认动态段。B1 已按提示声明与执行边界逐条对照。Skill 加入“判定快照与模型输入必须分离追踪”的验收规则；B3 状态下调为待读者复核。
 - 下次继续优先拿用户提出的具体问题沿实际请求和状态链完整回答，再按受影响专题更新；不要把本次 E38 的发现误报为全仓 Context/Harness 穷尽审计。源码研究基线仍为 `872ad960de7ec172591f7e1952f7849229f94521`。
 - 本轮文档与 Skill 验证：`quick_validate.py` 通过；10 个改动 Markdown 的本地相对链接均存在；B3 新 Mermaid 图在本机 Chrome 中通过解析并渲染 SVG；`git diff --check` 通过。按 `package.json` 的 typecheck 参数运行本地 `tsc -b` 通过，本地 `oxlint --quiet` 退出 0（0 error、70 个既有 warning）。第一次裸 `tsc -b` 因仓库根目录无 `tsconfig.json` 退出 1，已改用项目实际参数重跑成功。以上均非目标 Agent/Provider 实测。
+
+## Microcompact / Reactive Compact 汇报材料（2026-09-22）
+
+- 用户要求独立的 PPT 前置报告，对比 ZCode 与其自研方案：自研 Microcompact 在 40%/60% 进行两级**部分**工具结果裁剪；自研 Reactive 先最多三轮裁剪历史工具结果，仍超窗才压缩前一轮正常消息并拼回本轮增量。报告和两张 16:9 图位于 [briefing](../briefings/microcompact-reactive-comparison.md)，可编辑源是同目录 HTML。ZCode 一侧按当前源码核验，自研一侧只记录用户方案，具体算法和实现待核验。
+- 特别纠偏：“双方兜底一致”只成立于抽象目标。ZCode Reactive 从当前失败请求的 active entries 选旧组摘要、保留近期组，并重试同一模型步骤；没有显式回滚到上一轮成功 Provider 请求后再拼增量，也没有 Reactive 内的三轮工具结果裁剪。图与报告均保持该差异，避免 PPT 误传。
+- 此次只新增文档、HTML 和导出图片，未修改目标产品代码或启动目标 Agent/Provider。后续若取得自研源码，应核对 40%/60% 分母、软/硬裁剪片段算法、三轮的验证单位、正常消息版本与增量包含范围，再把“方案描述”升级为“实现确认”。
+- 验证：报告相对链接检查覆盖 15 个研究 Markdown 文件，0 个断链；可编辑 HTML 在本机 Chrome 以 1600×900 分别导出两张 PNG，两个页面节点均未超出画布，并已目视检查；`git diff --check` 与按仓库脚本参数运行的本地 `tsc -b` 通过，`oxlint --quiet` 退出 0（70 个既有 warning、0 error）。上述验证只涉及文档/渲染/仓库静态检查。

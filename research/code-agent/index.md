@@ -17,6 +17,8 @@
 4. [系统收束与工程借鉴](synthesis.md)：专题证据修正后的系统性质、迁移条件与限制。
 5. [读者与深度约定](research/reader-contract.md)、[证据台账](research/evidence.md)、[进度与未解问题](research/progress.md)、[Skill 试用记录](research/skill-trial.md)。
 
+汇报材料：[Microcompact / Reactive Compact 机制对比](briefings/microcompact-reactive-comparison.md)聚焦 ZCode 与用户描述的自研方案；两张 16:9 图片及可编辑 HTML 在同一目录。自研方案的实现细节尚未核验，不能把此对比当成双方源码审计。
+
 ## 覆盖与状态
 
 下表已阅读项均对应上述基线；“静态深挖完成”只表示源码覆盖，不代表已通过用户新粒度验收。未研究项不宣称有有效结论。
