@@ -347,3 +347,12 @@
 - `apps/zcode-cli/packages/core/src/plugin-reference/reminder.ts:158-180`、`runtime/methods/plugin-reference.ts:80-149`：Plugin 引用提示列出 live 能力，真实用户新引用才生成；旧提示如何留在模型历史受摘要区/保留组及 boundary 控制。
 
 支持：[B5](../topics/b-context-management.md) 的四类内容对比和假设任务例子。实际提示包装来自源码；示例名称、路径、摘要文本非运行记录。没有在上述生产压缩提交路径看到专门的 Skill 轨迹生成或恢复步骤，不能据此证明其他未检索范围绝无相关实现。
+
+## E37：Reactive compact 的入口、重选、提交与整体可发现性
+
+- `apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts:375-439,499-524,742-806`：普通请求抛 context-exceeded 或在特定条件下返回超窗 finish reason，恢复前检查同一步一次性标志及快速回填保护；成功重建 turn machine 并继续同一步，失败传播原错误。
+- `apps/zcode-cli/packages/core/src/runtime/methods/compact.ts:352-467`：Reactive 不走 Auto 的阈值触发，而从当前请求 entries 重新投影，禁用/历史不足时跳过；成功替换本轮请求、重置连续失败，非取消摘要失败增加计数。
+- `apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts:180-305,435-480,484-625,630-695`、`runtime/helpers/compact-selection.ts:59-139`：Reactive 共用摘要提交；初始错误和摘要请求超窗可增加最近组原文保留，媒体过大可剥离媒体重试，Auto/Reactive 不走最旧组丢弃兜底；只有 Auto 可在外层重试最多三次。
+- `apps/zcode-cli/packages/core/src/context/builder.ts:85-225`、`runtime/methods/context-refresh.ts:7-54`：Context 的 system/meta-user 条件分支、custom prompt 与 workflow 身份差异、Skill 工具可用性门槛及前缀重建。
+
+支持：[B5](../topics/b-context-management.md) 的主图回环、08 子流程和 Context 前缀条件。此前 B5 虽可全文搜索到 Reactive 一行表格，**整体流程验收仍不合格**；这次修订的是可发现性和决策链，尚未由用户复核，也未运行目标 Agent/Provider。

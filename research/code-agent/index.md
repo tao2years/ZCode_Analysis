@@ -27,8 +27,8 @@
 | Command admission、会话与 Agent Loop    | 源码专题               | 静态深挖完成 | 重试、取消和恢复的跨层设计仍可扩展       | [A1](topics/a-session-admission-agent-loop.md)       |
 | 工具调度、权限与结果闭合                | 源码专题               | 静态深挖完成 | Provider adapter 契约仍可扩展            | [A2](topics/a-tool-scheduling-and-results.md)        |
 | 消息重建、Context 与 Provider 投影      | 源码专题               | 静态深挖完成 | 最终 wire 精确形态不在本批证据内         | [B1](topics/b-message-context-and-provider-input.md) |
-| 上下文预算、跨 Session 按需读取、缓存与媒体投影 | 源码专题 | 静态深挖完成 | Provider 精确 token 与 cache 命中未知；`SessionMemory` trigger 未见核心发起点 | [B5](topics/b-context-management.md) |
-| 完整 compact、microcompact、reactive    | 源码专题               | 静态深挖完成 | Provider 外部行为不在源码证据内          | [B2](topics/b-compaction.md)                         |
+| 上下文预算、跨 Session 按需读取、缓存与媒体投影 | 源码专题 | 已补主链路，待读者复核 | Reactive 此前埋在表格；当前已单独展开。Provider 精确 token 与 cache 命中未知；`SessionMemory` trigger 未见核心发起点 | [B5](topics/b-context-management.md) |
+| 完整 compact、microcompact、reactive    | 源码专题               | 静态追踪完成，整体呈现待复核 | B2 有 Reactive 细节；B5 的发现路径此前不足，当前已补图。Provider 外部行为未验证 | [B2](topics/b-compaction.md)                         |
 | Project Memory 与跨会话冲突             | 源码专题               | 静态深挖完成 | 无法由源码保证所有竞争时序的最终结果     | [B3](topics/b-memory.md)                             |
 | 大结果可恢复性与 artifact 生命周期      | 源码专题               | 静态深挖完成 | 仓库外清理、具体远端路径可达性未知       | [B4](topics/b-large-tool-results.md)                 |
 | Desktop/mobile 交付语义                 | 关键契约概览           | 待深入       | 完整 owner/lease、跨 Host 路由和故障注入 | [Overview](overview.md)                              |

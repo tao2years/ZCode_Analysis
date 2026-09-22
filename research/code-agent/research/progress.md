@@ -97,3 +97,10 @@
 - 核心结论：压缩提交时专门生成的后置提醒是已批准 Plan 文件和已读文件状态；Skill catalog、Memory 索引随 Context 前缀持续可见。旧 Skill 正文及执行过程只可能通过最近保留组原文或通用摘要延续；未在生产压缩路径发现 Skill 专属 trajectory 摘要或 checkpoint。Plugin 旧引用由摘要/保留选择决定，新的用户引用才重新解析当前能力。
 - 下次继续时，若用户需要设计迁移建议，可比较“通用摘要续接”与“结构化 Skill 执行状态”的收益、持久化成本及可靠性，明确后者属于我们的设计提案，不是 ZCode 已有机制。本次仍为静态源码研究，未运行目标 Agent/Provider。
 - 验证：本轮为文档与 Skill 草案修改；Skill `quick_validate.py`、变更文件本地链接、`git diff --check`、`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，保留 70 条既有 warning。新增的是文字例子，没有新增 Mermaid 图或运行目标 Agent。
+
+## 整体上下文可发现性纠偏（2026-09-22）
+
+- 用户指出 B5 的整体流程没有清楚展现 Reactive compact，质疑“Skill 已深度试用”的质量宣称。回查证实：此前 Reactive 只在 B5 表格一行及末尾一段出现，主图没有 Provider 超窗后的恢复回环，手动 `/compact` 也不在入口说明。B5 已补主图回环、08 独立子流程和手动入口边界；ContextBuilder 的 custom prompt/Workflow/Skill 可见条件也补入 00–01。证据 E37。
+- [Skill 试用记录](skill-trial.md) 已把正确性分支与系统结论从“通过”改为待复核。Skill 草案此前用于静态研究清单，`quick_validate.py` 只证明结构合规；不能再称“深度使用且已通过研究质量验收”。index 中 B5/B2 状态同步下调，Skill 验收加“从入口图可发现机制”门槛。
+- 尚需用户复核新版主图与 Reactive 细节。未运行真实 Provider 超窗实验；源码可证明控制流，不能声称所有 Provider 错误都被准确分类或恢复一定成功。
+- 本轮验证：12 张研究 Mermaid 图在本机 Chrome 中完成解析和 SVG 渲染；Skill `quick_validate.py`、变更 Markdown 本地链接、`git diff --check`、`corepack pnpm typecheck` 通过；`corepack pnpm lint` 为 0 error、70 条已有 warning。这些仅证明文档结构和仓库静态检查，不证明用户已接受研究深度。

@@ -2,7 +2,7 @@
 
 ## 一条消息经过上下文系统的路径
 
-**阅读方向：从上往下，按 00 → 07。** 图只画一条主线；每个分支的判断标准、动作和下一站列在图下方。`02` 到 `07` 是一个 **model step**，同一用户消息可能因工具结果或续写多次回到 `02`。基线：`872ad960de7ec172591f7e1952f7849229f94521`。
+**阅读方向：从上往下，按 00 → 08。** `02` 到 `08` 是一个 **model step**；工具结果、输出续写或 Reactive compact 成功会回到 `02`，同一用户输入可能经过多次。手动 `/compact` 是独立命令入口，使用后文的完整摘要链路，不经过本图的自动阈值判断。基线：`872ad960de7ec172591f7e1952f7849229f94521`。
 
 ```mermaid
 flowchart TD
@@ -12,7 +12,12 @@ flowchart TD
     S03 --> S04["04 加入提醒和工具定义；构造请求消息"]
     S04 --> S05["05 估算输入 token；确定本步输出上限"]
     S05 --> S06["06 处理媒体附件；调用 Provider"]
-    S06 --> S07["07 处理模型响应；必要时执行工具"]
+    S06 --> S07{"07 请求结果是什么？"}
+    S07 -- 正常结束 --> DONE["本轮完成"]
+    S07 -- 工具结果或输出续写 --> S02
+    S07 -- Provider 判定上下文超窗 --> S08["08 尝试响应式完整压缩"]
+    S08 -- 摘要成功，重建本步请求 --> S02
+    S08 -- 无法压缩或再次超窗 --> ERROR["结束并报告错误"]
 ```
 
 **分支读法：**先按编号往下；遇到下表的条件，执行该行「动作」，再按「下一站」继续。`T` 指 auto compact 的输入 token 阈值，不是所有资源共用的阈值。
@@ -24,14 +29,14 @@ flowchart TD
 | 03 | auto compact 启用、有可摘要历史、连续失败未达默认 3 次，且 `tokenCount >= T`。默认 `T = max(0, contextWindow - min(maxOutputTokens, 21K) - 13K)`；窗口未知按 200K | 达标时选历史、摘要、持久化 boundary 并替换当前历史。成功或非取消失败都继续 → 04；rapid-refill breaker 触发则报错，取消则结束。 |
 | 05 | `contextWindow - estimatedInput - 1K > 0` | 输出上限取模型上限与该剩余值的较小值；否则保留模型上限，交由 Provider/后续恢复路径判定。→ 06 |
 | 06 | 媒体编码字节总量是否超过默认 40 MiB | 未超限 → Provider；超限但本轮真实用户媒体可保留 → 旧媒体按最近优先保留，其余变占位文本；仅本轮媒体已超限 → 附件错误，不进入 reactive compact。 |
-| 07a | Provider 抛出 context-exceeded；或在无 tool call、无输出续写的分支返回相应 finish reason | 同一 model step 最多尝试一次 reactive compact；成功后回到 **02** 重建请求；失败、跳过则保留原错误，取消则结束。 |
+| 08 | Provider 抛出 context-exceeded；或在无 tool call、无输出续写的分支返回相应 finish reason | 同一 model step 最多尝试一次 reactive compact；成功后回到 **02** 重建请求；失败、跳过则保留原错误，取消则结束。详细流程见下文 **08**。 |
 | 07b | Provider 返回工具调用 | 各工具先处理原始输出，通用结果序列化再按各工具预算截断/落盘；结果提交到请求历史后回到 **02**。已追踪的批量汇合代码没有统一的「并发总结果 token 闸门」。 |
 | 07c | Provider 达到输出 token 上限且允许续写 | 追加一次性续写输入，回到 **02**；若无法继续则返回输出上限错误。 |
 | 07d | 没有待执行工具、续写或恢复分支 | 正常结束本轮。 |
 
 [turn.ts:477-614](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn.ts) [turn-loop.ts:47-213](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) [runtime microcompact.ts:24-115](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [compact/microcompact.ts:77-195](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [policy.ts:67-155](../../../apps/zcode-cli/packages/core/src/compact/policy.ts) [model-token-limits.ts:17-40](../../../apps/zcode-cli/packages/core/src/runtime/methods/model-token-limits.ts) [media-budget.ts:75-150](../../../apps/zcode-cli/packages/core/src/runtime/helpers/media-budget.ts) [turn-model-step.ts:647-664](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [turn-tools.ts:235-269](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts)
 
-这里把分支标准放在编号旁，后文再分别展开内部流程。特别注意：auto compact 在 **03**、普通请求输出预算在 **05**、媒体字节预算在 **06**，三者单位和失败策略不同。完整压缩细节见 [B2](b-compaction.md)，工具结果细节见 [B4](b-large-tool-results.md)。阅读时还须区分持久 Session 消息、运行时历史、当前 request entries、最终 Provider 请求和 UI 展示。
+这里把分支标准放在编号旁，后文再分别展开内部流程。特别注意：auto compact 在 **03**、普通请求输出预算在 **05**、媒体字节预算在 **06**、Provider 拒绝后才可能发生的 reactive compact 在 **08**，四者的触发来源和失败策略不同。完整摘要的共享实现与手动入口见 [B2](b-compaction.md)，工具结果细节见 [B4](b-large-tool-results.md)。阅读时还须区分持久 Session 消息、运行时历史、当前 request entries、最终 Provider 请求和 UI 展示。
 
 ## 00–01. 一条新输入从哪里取得历史：冷恢复与 Context 初始化
 
@@ -42,6 +47,8 @@ flowchart TD
 恢复不是把数据库消息原样拼成一个字符串。`resumeFromStore` 读取 Session 与消息，恢复工作目录、任务类型、workspace identity、环境和 shell 选择；重置旧 Runtime `MessageHistory` 与 ContextBuilder，先从持久记录 hydrate read-file state，再重新解析上下文来源、发现 Skills、加载当前 `MEMORY.md` 索引。接着修复未完成的 compact timeline，再根据分支/rewind 和最后有效 compact boundary 选择模型有效历史并 hydrate。assistant/tool parts 会还原成模型消息；未完成的工具调用变为 *interrupted* 工具结果，不会擅自重放工具。started/retrying 的 compact timeline 若已有 boundary 则收敛为 completed，否则收敛为 interrupted。最后恢复 mode/执行状态、权限、Todo、目标状态，并运行 `SessionStart(source="resume")` hook；目标状态另作为运行时提醒注入。[resume.ts:91-179](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts) [resume.ts:191-262](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts) [session-history-hydrator.ts:54-199](../../../apps/zcode-cli/packages/core/src/agent/session-history-hydrator.ts) [compact-persistence.ts:200-287](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-persistence.ts)
 
 Context 初始化从 `ContextSourcePort` 得到指令/环境快照，并加载 Skill catalog、Memory root 和索引；随后 ContextBuilder 生成 system 与 meta-user 前缀。Memory 正文没有在每条消息开始时做语义检索：自动进入前缀的是索引（最多 200 行、25,000 字符），详情靠模型后续 Read/Grep/Glob。已运行的同一 runtime 复用 `memoryIndexContent` 快照；重新初始化/冷恢复才自然重新读取磁盘索引。每个新 turn 可从已有快照重建模型相关前缀，但不是重新扫描 Memory 文件。[context.ts:35-73](../../../apps/zcode-cli/packages/core/src/runtime/methods/context.ts) [context.ts:168-195](../../../apps/zcode-cli/packages/core/src/runtime/methods/context.ts) [request-user-context.ts:47-76](../../../apps/zcode-cli/packages/core/src/context/sections/request-user-context.ts) [index-content.ts:13-37](../../../apps/zcode-cli/packages/core/src/memory/index-content.ts) [context-refresh.ts:7-54](../../../apps/zcode-cli/packages/core/src/runtime/methods/context-refresh.ts)
+
+**Context 前缀也有条件分支。**默认身份、动态行为、环境和 Context 管理说明进入 system 侧；配置了输出风格或 Memory 后，对应说明也进入 system 侧；可用 Skill 列表、仓库/用户指令与 Memory 索引进入 meta-user 侧。显式 `customSystemPrompt` 会替换默认 system 体系并跳过上述动态 system 段，不能据“默认会注入”推断每种任务都看到它们；Workflow 子代理又有另一套身份与指导选择。Skill 列表只有 `Skill` 工具在当前运行时可用时才加入。模型/输出风格等配置变化可从已有快照重建前缀，不能误写成每次重读 Memory 磁盘文件。[ContextBuilder 分支](../../../apps/zcode-cli/packages/core/src/context/builder.ts) [前缀重建](../../../apps/zcode-cli/packages/core/src/runtime/methods/context-refresh.ts) [Skills 生成](../../../apps/zcode-cli/packages/core/src/context/sections/skills.ts)
 
 **这里有两种容易混称的“Session memory”。**其一是当前 Session 的持久消息：它供冷恢复和完整 compact 的有效历史选择使用，不是每轮自动向模型灌入全部旧 transcript。其二是**跨 Session 按需读取**：真实用户输入出现 `#sess_*` 时，只附加一个提醒，明确旧会话不会自动展开；模型确需背景时，调用 `ReadSessionContext(sessionId, query, strategy)`。该工具读取另一会话的持久 Session 消息、先按有效分支/compact boundary 选取可读内容，再按 query 与字符预算选片段；有模型时可用单独的轻量提取请求，失败则回退本地选段。工具结果作为当前会话的一次 tool result 进入后续上下文，不等于本会话 `/resume`，也不是自动语义检索全部历史。[references.ts:5-27](../../../apps/zcode-cli/packages/core/src/session-context/references.ts) [turn.ts:863-872](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn.ts) [read-session-context.ts:38-143](../../../apps/zcode-cli/packages/core/src/tool/handlers/read-session-context.ts) [session-context/read-session-context.ts:54-100](../../../apps/zcode-cli/packages/core/src/session-context/read-session-context.ts)
 
@@ -231,3 +238,31 @@ Memory 的常驻部分是索引而非自动检索出来的正文；`Skill` 目�
 Provider 抛 context-exceeded，或在无 tool call/无输出续写时返回相应 finish reason，才走 reactive compact；同一个 model step 最多尝试一次，成功后替换 entries、重建 turn machine，再回到 02 重新组装。若没有足够历史、compact 禁用或恢复失败，就保留原错误；rapid-refill breaker 另有显式错误。summary 请求自身的 prompt-too-long、媒体太大按 03 的内部重试处理，不能与普通请求的 reactive 分支混为一谈。输出 token 到上限则走独立的 continuation 分支。[turn-model-step.ts:429-439](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [turn-model-step.ts:500-524](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [turn-model-step.ts:647-705](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [turn-model-step.ts:742-802](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts)
 
 这套设计的可迁移要点是把**摘要历史、保留原文、独立持久状态、外置文件和请求时投影**分开设计。完整 compact 不是无损存档：Session 旧消息仍在，但当前模型不自动看见；文件与 Todo 仍可读取，但未必自动注入；Skill/Hook 旧内容若落入摘要区，只能依赖摘要质量或显式重新加载。对当前仓库的判断是源码静态追踪，未将假设例子写作实际运行验证。
+
+## 08. Reactive compact：Provider 拒绝之后如何重试同一步
+
+这条路径与 **03 的主动压缩**共用摘要和持久化实现，但**不要求本地估算先达到主动阈值**。例如本地估算低于门槛，Provider 仍判定请求超窗（真实 tokenizer、工具 schema 等可能造成差异），模型步骤就会进入这里；下述例子是条件演示，不是一次已观察到的 Provider 调用。[普通请求错误入口](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [Reactive 入口](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts)
+
+```mermaid
+flowchart TD
+    R1["① Provider 报上下文超窗<br/>抛错，或返回超窗结束原因"] --> R2{"② 本次模型步骤已经尝试过<br/>或者连续快速压缩保护已触发？"}
+    R2 -- 是 --> RF["停止恢复；报告错误"]
+    R2 -- 否 --> R3{"③ 完整压缩启用<br/>且仍有足够旧历史可摘要？"}
+    R3 -- 否 --> RF
+    R3 -- 是 --> R4["④ 从当前请求选旧消息生成摘要<br/>最近消息保留原文"]
+    R4 --> R5{"⑤ 摘要请求成功？"}
+    R5 -- 否 --> RF
+    R5 -- 是 --> R6["⑥ 持久化摘要与边界<br/>替换本轮消息，重建模型步骤"]
+    R6 --> R7["⑦ 回到 02，重新装配并请求 Provider"]
+    R7 -- 再次超窗 --> RF
+```
+
+**① 哪些失败真正触发？**普通请求抛出的错误需被识别为 `ModelContextExceeded`，或结果的标准/原始 finish reason 明确标记为超窗；后一条路径还要求本地终止未处理、没有工具调用、没有输出上限续写。当前媒体附件过大走媒体错误路径，不会靠这条 Reactive compact 修复。[错误识别](../../../apps/zcode-cli/packages/core/src/runtime/helpers/model-errors.ts) [抛错路径](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [finish reason 路径](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts)
+
+**②–③ 为什么会跳过？**一次模型步骤只允许一次 Reactive 尝试；快速回填保护在距上次完整压缩不足 3 个已完成工具批次且连续快速再触发达到 3 次时阻断。之后才从**当前请求 entries** 重新投影；总 compact 被禁用、历史不足两组或没有可摘要 assistant 时返回 skipped。这里不因 `tokenCount < T` 跳过，也不使用 UI 消息或整份 SQLite transcript 重新摘要。[步骤保护](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [快速回填计数](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop-state.ts) [Reactive 条件](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts)
+
+**④–⑤ 摘要模型具体收到什么？**先选旧组作摘要输入、最近至少一组原文保留，再附通用压缩 Prompt，单独发一笔模型请求。若 Provider 的初始错误给出可解析的 token 超额差值，且历史足够，可在第一次摘要请求前多保留最近组；摘要请求自身超窗时继续把最近待摘要组移到保留区，从而缩短摘要请求。Reactive **不会**启用手动压缩可用的“丢掉最旧摘要组”降级；扩大原文保留区反而可能让最终上下文更大。摘要请求媒体太大时先剥离媒体重试；取消直接向外传播。[初始重选](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [摘要请求与异常处理](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [压缩 Prompt](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts)
+
+**⑥–⑦ 成功与失败怎样落地？**成功时写隐藏 summary、后置提醒和 CompactBoundary，替换 canonical 运行时历史及本轮 request entries，清连续压缩失败计数，重建 turn machine，随后回到 02 重组**同一个**模型步骤。若摘要 skipped/failed，原超窗错误继续抛出；非取消失败增加连续失败计数。若重试的普通请求再次超窗，一次尝试标记仍在，不能无限循环。Provider 抛错的分支还会先持久化失败 assistant 记录；不能把它和摘要后的成功模型响应合并成一次普通成功。[提交和替换](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [Reactive 结果](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) [同一步重试](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts)
+
+本专题的上下文入口还包括**手动 `/compact`**：它直接调用完整摘要链路，可带自定义摘要指令，不经 03 的自动 token 阈值；手动摘要请求超窗时允许进一步丢最旧组，语义与 Auto/Reactive 不同。具体选组和失败规则见 [B2](b-compaction.md)。在当前报告中，Provider 最终 wire 的逐字段预算、真实 tokenizer 偏差和缓存命中率仍没有运行证据；这些不能由本地图和静态摘要冒充已验证行为。
