@@ -278,3 +278,15 @@
 - `apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:40-63`：`CompactTrigger.SessionMemory` 仅见 phase/reason 映射；对 core 生产调用点的检索未发现该 trigger 的发起者，不能据枚举宣称已启用会话记忆压缩。
 
 支持：[B5](../topics/b-context-management.md) 对当前会话恢复、跨 Session 读取和 Project Memory 的区分。限制：缺少外部插件或未来调用者的证明，未运行目标 Agent/Provider。
+
+## E30：Microcompact 与 Auto compact 的可计算判断和消息分组
+
+- `apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts:67-103`：每个 model step 先试 Microcompact，再试 Auto compact。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:90-150`、`runtime/helpers/provider-request-messages.ts:45-104`：runtime entries 投影为模型请求消息，Microcompact 回写对应 runtime entry。
+- `apps/zcode-cli/packages/core/src/compact/manual.ts:102-140`、`packages/shared/src/usage-stats.ts:9`：字符估算的组成和除数。
+- `apps/zcode-cli/packages/core/src/compact/microcompact.ts:77-168,171-256`、`runtime/methods/microcompact.ts:24-115`：空闲/Token 双触发、默认参数、工具批次分组、保留最近组、最低收益以及 runtime 历史替换。
+- `apps/zcode-cli/packages/core/src/runtime/methods/compact.ts:184-245,313-349`、`compact/policy.ts:1-155`：Auto 阈值、Provider usage 基线和失败门槛。旧工具结果已包含在 usage 基线时，Microcompact 的节省不会被 Auto 的增量估算反向扣除；这是两条计数路径的条件性静态推论。
+- `apps/zcode-cli/packages/core/src/compact/rounds.ts:1-33`、`runtime/helpers/compact-selection.ts:30-60,350-362`：Auto 按新 assistant 消息切组；开头 user 消息可能单独成组，最近组原文保留。
+- `apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts:180-238,267-305,308-480,517-625,635-690`、`compact/prompt.ts:1-165`：摘要输入、Prompt、两层重试、持久化和历史替换。
+
+支持：[B5](../topics/b-context-management.md) 的 M1–M6/A1–A6 小流程、阈值演算及分组实例。限制：例子使用假设消息和数字，没有运行目标 Agent 或 Provider；Provider 实际 tokenizer/cache 行为仍未知。

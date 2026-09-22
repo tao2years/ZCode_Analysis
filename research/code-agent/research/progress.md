@@ -19,6 +19,7 @@
 - 完成 A1/A2 与 B1–B5 七篇专题，覆盖会话恢复、权限与超时、reactive compact、Memory extraction/并发、大结果完整性及上下文全貌。
 - 更正 B4 对 Bash 执行输出的过度概括：POSIX Bash merged-output 由子进程直接写文件，pipe 路径才由 OutputCollector 采集；详见 E26。
 - 根据用户追问，B5 增补 Microcompact 的逐层持久边界、model-io JSONL 与权威 transcript 的区别，以及 `ReadSessionContext` 跨会话按需读取；证据见 E28、E29。同步更新 Overview、synthesis、index 和 Skill 的问题库/模板/证据标准。
+- 再按用户反馈将 B5 的 Microcompact 与 Auto compact 展开为同页编号子流程，补投影定义、估算公式与来源、双触发、工具批次筛选、保留/撤销条件、摘要分组实例及失败去向；证据见 E30。Skill 增加“能按消息序列和参数复算决策”的验收标准。
 
 ## 已确定结论
 
@@ -64,3 +65,10 @@
 - 仍待验证：自定义 eventStore 的具体持久行为、真实 Provider token/cache 表现、外部调用者是否使用 `CompactTrigger.SessionMemory`。当前结论只限已追踪核心生产路径。
 
 恢复时先运行 freshness、检查 `git diff -- research/code-agent skill-drafts`，确认源码基线是否变化。
+
+## 跨设备 handoff 增补（2026-09-22）
+
+- 用户本轮校准了研究粒度：复杂子模块应有短而可读的独立小流程图，同页讲清每一步；不能只写“估算/裁剪”，必须给公式、参数来源、分组实例、保留与回滚门槛，同时压缩重复散文。已落实于 [B5 的 02–03](../topics/b-context-management.md)、[E30](evidence.md) 和 Skill 的 `report-templates.md` / `evidence-and-depth.md`。
+- 特别核对：Microcompact 用本地投影估算；Auto 优先用 Provider usage 基线加增量，因此 Microcompact 清掉已落在旧 usage 基线内的内容时，Auto 的触发计数未必同步下降。该点是源码推论，未作真实 Provider 验证。
+- 本轮没有改目标仓库代码或运行目标 Agent。后续问答应先在对应专题内补可计算实例和源码边界，积累到适当时机再回写 Overview 与 Skill；不要把假设实例写成目标仓库运行事实。
+- 本轮验证：freshness 通过；B5 的 3 个 Mermaid 图在本机 Chrome 中用仓库安装的 Mermaid 解析成功（未做截图级视觉检查）；Skill `quick_validate.py` 通过；本地 Markdown 链接与 `git diff --check` 通过；`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，仍为 70 条既有 warning、0 error。

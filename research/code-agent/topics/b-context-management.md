@@ -51,27 +51,69 @@ Context 初始化从 `ContextSourcePort` 得到指令/环境快照，并加载 S
 
 ## 02. Microcompact：只清旧工具结果，不生成摘要
 
-**触发。**总 compact 被禁用时直接跳过；microcompact 本身默认关闭，需显式 `compact.microcompact.enabled === true`。开启后每个 model step 前检查：上次 assistant 完成后空闲超过默认 60 分钟，**或**投影后的估算 token 达到 `M = max(0, min(floor(T × 0.9), T − 2,000))`（`T` 是完整 auto compact 阈值）。时间与 token 只是触发尝试；没有合格候选时仍不改变历史。[runtime microcompact.ts:24-56](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [runtime microcompact.ts:105-115](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [compact/microcompact.ts:12-24](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [compact/microcompact.ts:77-113](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [compact/microcompact.ts:171-195](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts)
+**阅读方向：M1 → M6；任一“跳过”都回到总流程 03。**
 
-**选什么。**先把 runtime entries 投影为模型消息，再按 assistant 的 tool-call 批次收集合格 tool result。默认仅 Read、Bash、Grep、Glob、WebFetch、WebSearch、Edit、Write、ApplyPatch；默认不清错误、已经清过的结果以及含 image/video/file 的结果。保留最近 5 个合格组，只清更旧的组；预计节省不足 256 token 也放弃。这里的“5 组”是 assistant tool-call groups，不是最后 5 个字节块或 5 条任意消息。[runtime compact.ts:90-150](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) [compact/microcompact.ts:115-168](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [compact/microcompact.ts:197-256](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts)
+```mermaid
+flowchart TD
+    M1["M1 取本轮 request entries；投影成模型消息"] --> M2{"M2 总 compact 未禁用且 micro 显式开启？"}
+    M2 -- 否 --> MS["跳过；原历史不变"]
+    M2 -- 是 --> M3{"M3 距上次 assistant 完成大于 60 分钟，或本地估算达到 M？"}
+    M3 -- 否 --> MS
+    M3 -- 是 --> M4["M4 过滤合格工具结果；按调用批次分组"]
+    M4 --> M5{"M5 组数大于保留数，且预计至少省 256 token？"}
+    M5 -- 否 --> MS
+    M5 -- 是 --> M6["M6 清旧组；替换运行时历史与本轮 entries；发事件"]
+```
 
-**做什么、改哪层。**把所选 tool result 的模型可见内容换成固定文本 `[Old tool result content cleared]`，保留 tool-call ID、配对关系、顺序和其他消息；以 copy-on-write 更新 canonical 运行时 `MessageHistory` **和**本轮 `request entries`。所以它不只是一次 Provider 请求的临时投影：同一 runtime 后续 model step 也会继续看到清理后的内容。源码还追加 `MicrocompactBoundary` event，但默认 `eventStore` 是内存存储，`persistDurableSessionEvent` 没有这个事件的 SessionStore 分支。原始 Session tool part 的 `output`/媒体记录不被回写或删除，UI 的权威 transcript 也不因这一步缩短。它不生成摘要，也没有凭占位文字找回原结果的机制。[runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [turn-tools.ts:286-345](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts) [events.ts:81-108](../../../apps/zcode-cli/packages/core/src/runtime/methods/events.ts) [events.ts:263-280](../../../apps/zcode-cli/packages/core/src/runtime/methods/events.ts) [events.ts:420-423](../../../apps/zcode-cli/packages/core/src/runtime/methods/events.ts) [create-app.ts:727-731](../../../apps/zcode-cli/packages/bootstrap/src/app/create-app.ts)
+| 决策点 | 实际输入与计算 | 容易误解的边界 |
+| --- | --- | --- |
+| M1「投影」 | `buildProviderRequestMessages(entries, applyCacheControl: false)` 把 runtime attachment 包成模型消息，处理其顺序及会话中途 system 的表示，剥离内部 metadata；**尚未调用 Provider**。Microcompact 以这份消息判断“模型会看到什么”，再凭 `toolCallId` 回写对应 runtime entry。 | 不是读取 SQLite/UI 文本，也不是最终 wire payload；工具 schema 和之后的媒体预算不在本次估算中。 |
+| M3「估算」 | 对每条投影消息：`ceil((内容文本长度 + tool-call 名称及 JSON 入参长度) / 3)`，逐条求和；reasoning 文本计入，image/video 等按文字占位估，**不用 Provider usage**。`T = max(0, W − min(R, 21,000) − B)`；默认 `W=200,000`、`R=模型声明的最大输出或 32,000`、`B=13,000`。`M` 默认 `max(0, min(floor(0.9×T), T−2,000))`，可由 `microcompact.thresholdTokens` 覆盖。 | 时间阈值是距**上次 assistant 完成**严格大于默认 60 分钟；没有完成时间就不能走时间分支。时间条件先判断，同时满足时标记为 time-based。配置可覆盖 idle 分钟数。 |
+| M4–M5「选与算收益」 | 默认候选工具：Read、Bash、Grep、Glob、WebFetch、WebSearch、Edit、Write、ApplyPatch；默认排除错误、已清过、含 image/video/file 的结果。每遇到一次 assistant tool-call 批次建立一组，同批多个合格结果同组；仅统计**合格组**。保留最新默认 5 组（配置可覆盖，但最少 1 组），清更旧组中全部合格结果。用替换前后同一估算器算差额；小于默认 256 token 则撤销整个清理。 | 不是删最早 5 条消息，也不是按字节截一段；单个不合格结果不使同批其他合格结果失去资格。 |
 
-**冷恢复与 JSONL 不是同一件事。**`resumeFromStore` 从 SessionStore 读持久消息，hydrator 对 completed tool part 读取原 `output` 或持久媒体，当前路径没有重放 microcompact boundary 来再清旧结果；如果完整 compact 已提交，仍须先按最后有效 compact boundary 选历史，不能因此说“所有 microcompact 前工具结果必定回来”。ZCode 默认 SessionStore 是 SQLite；另有 `model-io-<session>.jsonl` 诊断请求/响应，它可能记录某次清理前的请求，也会记录清理后的请求。默认诊断模式按 delta/tail、大小上限、轮转和脱敏规则保存；显式全量保留模式跳过容量/缩减规则，但仍不是 Session 冷恢复源。不能用“JSONL 还在”保证原工具结果可恢复。若后续完整 compact 摘要基于已清理的运行时历史生成，清除还可能**间接影响持久化摘要**，虽不改变原 tool part。[resume.ts:91-174](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts) [session-history-hydrator.ts:149-178](../../../apps/zcode-cli/packages/core/src/agent/session-history-hydrator.ts) [session-store.ts:1-6](../../../apps/zcode-cli/packages/adapters/src/storage/session-store.ts) [runner-debug.ts:34-46](../../../apps/zcode-cli/packages/adapters/src/model/runner-debug.ts) [runner-debug.ts:470-535](../../../apps/zcode-cli/packages/adapters/src/model/runner-debug.ts) [runner-debug.ts:627-755](../../../apps/zcode-cli/packages/adapters/src/model/runner-debug.ts)
+以**假设数据**算一次：模型窗口 200K、输出上限 32K，得 `T=166K`、`M=min(149.4K,164K)=149.4K`。当前投影估算只有 120K，但上次 assistant 完成已过去 61 分钟，仍进入 M4。若有按时间排序的合格批次 G1…G7，其中 G1 的一次 assistant 调用了 Read 与 Bash、各返回一条合格结果，则保留 G3…G7，替换 G1 的 **两条**结果和 G2 的合格结果；若三条合计只省 200 token，M5 会把清理全部撤销。数字是按源码规则的推演，未运行 Provider。[投影](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) · [估算器](../../../apps/zcode-cli/packages/core/src/compact/manual.ts) · [常量与分组](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) · [阈值构造](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) · [每步调用位置](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts)
 
-**示例（假设输入，不是运行记录）：**历史里有 8 个合格 tool-call 组；在启用且触发后，前 3 组的文本结果被替成标记，后 5 组原样保留。如果前 3 组都是很短的输出、节省不足 256 token，则 8 组全部保持原样。压缩完仍进入步骤 03；microcompact 并不保证把输入压到完整 compact 阈值以下。
+**M6 只改两份活跃表示：**运行时 canonical `MessageHistory` 与本轮 `request entries`。被选结果的 content 变为 `[Old tool result content cleared]`；tool-call ID、顺序和配对保留。默认 `MicrocompactBoundary` 进入内存 eventStore；原 Session tool part 不回写，UI transcript 不缩短。故同一 Runtime 的后续模型步骤继续看到占位符，但冷恢复从持久 tool part 重建时不会回放这次清理。[runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [turn-tools.ts:286-345](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts) [events.ts:263-280](../../../apps/zcode-cli/packages/core/src/runtime/methods/events.ts)
+
+| 冷恢复时的来源 | 原工具结果还在吗？ | 会不会直接回到模型？ |
+| --- | --- | --- |
+| SQLite Session tool part | Microcompact 不改原 `output`/持久媒体。 | hydrator 可重建；但若后来有**完整 compact boundary**，仍要先按 boundary 选择有效历史。 |
+| `model-io-<session>.jsonl` 诊断 | 可能记过清理前或清理后的请求；默认会缩减、限额、轮转、脱敏。显式全量保留模式另有规则。 | **不会作为冷恢复源**，不能凭 JSONL 曾含原文保证可恢复。 |
+
+若之后的完整 compact 摘要基于已清理的运行时历史生成，Microcompact 还可能**间接影响持久化摘要**，尽管它没有修改原 tool part。[冷恢复](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts) · [tool part hydration](../../../apps/zcode-cli/packages/core/src/agent/session-history-hydrator.ts) · [SQLite store](../../../apps/zcode-cli/packages/adapters/src/storage/session-store.ts) · [诊断 JSONL](../../../apps/zcode-cli/packages/adapters/src/model/runner-debug.ts)
+
+Microcompact 不保证清理后低于 Auto compact 阈值；下一站始终是 03。
 
 ## 03. Auto compact：判定、摘要、替换和冷重建
 
-**先估算，再决定。**`turn-loop` 在 02 后调用 `autoCompactIfNeeded`。它把当前 `request entries` 投影成 Provider 消息，优先用最近已提交 assistant 的 Provider usage 作为基线，加上此后消息的本地估算；没有可用基线时估算整个投影。默认窗口未知按 200K；`T = max(0, contextWindow − min(modelMaxOutputTokens 或默认 32K, 21K) − 13K)`。禁用、可摘要历史不足、连续失败达到默认 3 次或估算未到 `T` 时跳过；达标后另检查 rapid-refill breaker，避免刚压缩后立刻反复压缩。[turn-loop.ts:67-103](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) [compact.ts:184-245](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) [compact.ts:313-349](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) [policy.ts:67-155](../../../apps/zcode-cli/packages/core/src/compact/policy.ts)
+**阅读方向：A1 → A6；跳过或失败回到总流程 04。**与 M3 不同，Auto compact 的触发值优先使用最近一次已提交的 Provider usage。
 
-**摘要前如何处理消息。**先复制 active entries（依赖 entry 不可变约定），把 Context 前缀和会话正文分开；正文按“assistant 开始的轮次”分组。auto/reactive 默认保留最近至少一组原文，同时至少留一组可摘要；更早各组连同 Context 前缀组成独立 summary 请求。前缀给摘要模型作背景，但 `summarizedMessageCount` 不把它当成被摘要的对话正文。不是对每条 msg 预先做统一截断。若原请求已被 Provider 报超窗且错误给出 token 差额，reactive 入口可先扩大最近保留区，使 summary 请求少带几组；summary 自己超窗时继续扩大保留区。[compact-active.ts:180-238](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact-selection.ts:30-57](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [compact-selection.ts:103-165](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts)
+```mermaid
+flowchart TD
+    A1["A1 将当前 entries 投影成模型消息"] --> A2["A2 取最近 Provider usage 基线；估算新增消息"]
+    A2 --> A3{"A3 启用、历史足够、未触发失败熔断，且 token 达到 T？"}
+    A3 -- 否 --> AS["跳过；原历史进入 04"]
+    A3 -- 是 --> A4["A4 分开 Context 前缀；旧组待摘要，最新组保留原文"]
+    A4 --> A5["A5 独立模型请求：旧组 + 压缩 Prompt"]
+    A5 --> A6{"A6 摘要有效？"}
+    A6 -- 是 --> AC["持久化 summary/boundary；替换运行时历史；进入 04"]
+    A6 -- 否 --> AF["按错误类型重选/重试；最终失败保留原历史"]
+```
 
-**压缩 Prompt 在哪里。**完整模板在 [`compact/prompt.ts`](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts)：要求模型按时间梳理用户意图、已采取动作、技术细节、错误与反馈、当前工作和下一步，以 `<analysis>` 与 `<summary>` 格式输出；前后都强调仅返回文本、不要调用工具。`buildCompactSummaryRequestMessages` 把选中历史加上该 Prompt 作为最后一条 user 消息，再做 Provider 投影和媒体能力/字节预算。摘要请求输出最多 20K；工具目录超过 100 个时不传工具。即使工具可见，模型若真的返回 tool call，代码也拒绝把它当成有效摘要。auto 不传自定义压缩指令；手动 `/compact` 可以追加 custom instructions。[prompt.ts:1-116](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts) [compact-active-helpers.ts:80-120](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active-helpers.ts) [compact-active.ts:251-268](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact-active.ts:308-416](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact-active.ts:716-725](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts)
+| 步骤 | 具体规则 | 输出或边界 |
+| --- | --- | --- |
+| A1–A3：判断 | 投影方式与 M1 类似。找到最近已提交 assistant 的有效 usage：若它已覆盖 assistant 输出，用 `contextUsageTokens + 后续消息本地估算`；否则用 `inputTokens + 从该 assistant 起的本地估算`。没有有效 usage 才对全部投影消息按 M3 的字符估算。`T = max(0, W − min(R,21K) − B)`，默认 `W=200K`、`R=模型最大输出或32K`、`B=13K`；`tokenCount >= T` 才可压缩。 | `compact.enabled=false`、正文分组少于 2 组**或**没有 assistant、连续失败达到默认 3 次、未到 T 均跳过。达到 T 后还检查 rapid-refill breaker：若距上次 compact 不足 3 个已完成工具批次且连续快速再触发达到 3 次，就报错。Microcompact 的“空闲 60 分钟”不参与 A3。 |
+| A4：选择 | 从 active entries 复制快照，单独取出 system/Context 前缀；剩余历史按**新 assistant 消息开始**划组。Auto 默认保留最新 1 组逐条原文，其余组用于摘要；至少还要有 1 组可摘要。 | 组不是固定“一条 user + 一条 assistant”；tool result、后续 user/attachment 可能同属一组。前缀只供摘要模型理解，不算作被摘要的会话正文。 |
+| A5：生成 | 将压缩 Prompt 作为最后一条 user 消息接在选中历史后，随后做媒体能力与字节预算投影。Prompt 要求按时间保留用户要求、技术细节、错误、反馈及待办，以 `<analysis>`/`<summary>` 返回，禁止工具调用；模型输出最多 20K，工具数超过 100 时请求不传工具。Auto 无自定义指令，手动 `/compact` 可追加。 | 这是**另一笔模型调用**，不是本轮普通请求就地改写。模型真的返回 tool call 或摘要无效会失败。完整 Prompt 见 [`compact/prompt.ts`](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts)。 |
+| A6：提交 | 去掉 `<analysis>`，整理 `<summary>`，生成一条对 UI 隐藏、对模型可见的 synthetic user summary；持久化 summary 和 compact boundary，再把运行时历史换成 `当前 Context 前缀 + summary + 最后保留组原文 + 后置提醒`。 | 旧 Session 消息不物理删除，但后续模型不自动再看到被摘要组全文；冷恢复按 boundary 复原有效历史。 |
 
-**摘要请求异常。**摘要模型若遇媒体过大，第一次失败后剥离媒体重试；若抛 context-exceeded 或以 finish reason 表示超窗，尝试把更多最近组移出 summary 请求，作为原文保留。对 auto/reactive，源码不启用“再丢弃最旧组”的 summary 截断兜底；该兜底属于其他触发类型。auto 对可重试的整个摘要操作最多 3 次，reactive 的完整 compact 只尝试一次；取消直接传播。摘要失败时 auto 记录失败后继续用原历史尝试普通请求，reactive 失败则保留原超窗错误。[compact-active.ts:267-305](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact-active.ts:417-480](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact-active.ts:632-690](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact.ts:257-310](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) [compact.ts:410-461](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts)
+**分组实例（假设序列）：**`前缀, U1, A1(tool), T1, U2, A2(tool), T2, U3, A3` 会切成 `G1=[U1]`、`G2=[A1,T1,U2]`、`G3=[A2,T2,U3]`、`G4=[A3]`。默认摘要输入是 `前缀+G1+G2+G3+压缩 Prompt`，G4 原样进入新历史；不是按 user 消息切轮。[实际分组函数](../../../apps/zcode-cli/packages/core/src/compact/rounds.ts) · [runtime 分组调用](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts)
 
-**摘要成功后的请求历史。**模型返回的 `<analysis>` 被移除，`<summary>` 被整理为 `Summary:`；代码生成一条隐藏于 UI、但模型可见的 synthetic user summary。新 runtime entries 是 `当前 Context 前缀 + summary + 最近保留原文 + 后置提醒`，并非重新打开所有文件或重播全部工具。最近保留组里的 assistant usage 被失效化，避免旧 usage 继续当新请求的 token 基线。摘要本身是有损的；recent group 才是逐条原文保留。此调用没有给 summary message 传 `transcriptPath`，因此虽然旧消息仍在 Session Store，当前模型不会因此自动得到完整旧 transcript 的读取路径。[prompt.ts:119-165](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts) [runtime compact.ts:72-87](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) [runtime compact.ts:157-166](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) [compact-active.ts:517-548](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts)
+**M3 与 A2 不能混为一笔账：**Microcompact 的本地估算会直接反映已替换的旧工具结果；Auto compact 若找到了较早的 Provider usage 基线，只估算该 assistant 之后的消息。若清掉的结果已包含在基线内，A2 不会从旧 usage 中反向扣除节省值，因此 M6 成功也不能保证 A3 低于阈值。这是由两个计数路径推得的条件性结论，不是运行验证。[Microcompact 本地估算](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) · [Auto usage 基线](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts)
+
+**异常不是一个笼统“重试”。**摘要请求媒体过大时，剥离媒体重试；摘要请求超窗时，把更多最近组从摘要输入移到“保留原文”，使摘要请求变小，但压缩后的上下文可能因此更大。Auto/Reactive 不用“丢最旧组”兜底；Auto 整个可重试操作最多 3 次，Reactive 一次。Auto 最终失败保留原历史继续普通请求；取消直接传播。已触发 rapid-refill breaker 则在调用摘要前报错。这里的“重选组”和“整个操作重试”是两层不同的尝试。[触发和 usage](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) · [阈值](../../../apps/zcode-cli/packages/core/src/compact/policy.ts) · [分组](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) · [摘要请求与提交](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts)
+
+**A6 还有两个易漏细节：**保留组的 assistant usage 会失效，防止旧 usage 被误当作新请求 token 基线；summary message 没有传 `transcriptPath`，因此旧 Session 事实虽在，模型不会自动得到全文读取路径。摘要有损，只有保留组逐条留原文。[prompt.ts:119-165](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts) [runtime compact.ts:72-87](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) [runtime compact.ts:157-166](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) [compact-active.ts:517-548](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts)
 
 **哪些东西单独保留或重新注入？**下表把“模型能否继续看到”与“底层事实是否还在”分开：
 
