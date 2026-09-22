@@ -84,6 +84,8 @@
 
 ## Microcompact 图与冷恢复反弹校准（2026-09-22）
 
+**最新阅读偏好修正：**上一版把公式、变量和配置名塞进图，用户明确反馈难读。现改为白话节点，保留 60 分钟、5 组、256 token 等关键数字；门槛计算紧接图下用中文名称和数字例子说明，再提供源码变量。不要把“可复现”误解为“流程图代码化”。本条修正优先于下方历史记录中的“图内写变量/公式”。Skill 与 reader-contract 已同步修正。
+
 - 用户进一步明确：**图自身**至少写触发式及变量、旧结果扫描方向、合格对象、完整替换文本和收益提交条件；持久化差异放在图下解释。已重画 [B5 的 Microcompact 子流程](../topics/b-context-management.md)；E35 保留恢复路径证据，Skill 的模板/证据标准和[读者约定](reader-contract.md)同步固化这一粒度。
 - 冷恢复反弹结论：仅做 Microcompact 时，SQLite 原 tool part 未改；下一次冷恢复会重建它们，下一次模型步再依次尝试 Microcompact、Auto compact。Auto 优先使用最近 Provider usage，若它反映清理后输入而恢复带回更早全文，可能低估；output preflight 不硬阻断超窗，Provider 报错后 Reactive compact 仍可失败。此为静态推论，**尚未实测冷恢复或 Provider**。
 - 下次继续时先检查文档及 Skill 的 diff，核对当前分支与推送状态；如果用户继续追问恢复风险，可用假设时间轴和 token 数再推一次，并明确哪些状态已经完整 compact。相邻 B2/B1 的估算与恢复表述也应保持与 B5 一致。
