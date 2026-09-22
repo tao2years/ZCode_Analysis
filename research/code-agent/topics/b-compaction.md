@@ -54,6 +54,8 @@ compact 创建独立 operation/timeline，快照 active entries，并用当前 s
 
 summary 成功后，系统生成隐藏且 Provider-visible 的 synthetic user message，并加入 post-compact reminders，例如已批准 plan 引用和需要重新读取文件的提醒。然后构造 `CompactBoundary`，其中记录 summary ID、最后被摘要消息、保留段、压缩前后 token、触发类型和是否预计下 turn 再触发。[compact-active.ts:484-573](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts)
 
+Plan、Skill、Memory、Plugin 压缩后实际可见的提示格式和假设任务示例见 [B5 的四类内容续接](b-context-management.md)。其中 Skill 可用目录会留在 Context 前缀，但旧 Skill 调用和执行过程只随通用对话摘要或最近保留组延续；没有专门的 Skill 执行轨迹摘要字段。
+
 提交顺序是：
 
 1. 持久化 summary message、text part、compaction part 及 reminders；任一步失败都 best-effort 删除本次已写 messages。

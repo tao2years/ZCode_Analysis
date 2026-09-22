@@ -90,3 +90,10 @@
 - 冷恢复反弹结论：仅做 Microcompact 时，SQLite 原 tool part 未改；下一次冷恢复会重建它们，下一次模型步再依次尝试 Microcompact、Auto compact。Auto 优先使用最近 Provider usage，若它反映清理后输入而恢复带回更早全文，可能低估；output preflight 不硬阻断超窗，Provider 报错后 Reactive compact 仍可失败。此为静态推论，**尚未实测冷恢复或 Provider**。
 - 下次继续时先检查文档及 Skill 的 diff，核对当前分支与推送状态；如果用户继续追问恢复风险，可用假设时间轴和 token 数再推一次，并明确哪些状态已经完整 compact。相邻 B2/B1 的估算与恢复表述也应保持与 B5 一致。
 - 本次校验：11 张 Mermaid 图在本机 Chrome 中用仓库 Mermaid 解析并渲染 SVG 成功；变更 Markdown 的本地链接检查、Skill `quick_validate.py`、`git diff --check`、`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，仍有 70 条已有 warning。未启动目标 Agent、未运行真实冷恢复或 Provider 超窗。
+
+## 完整压缩后内容续接的具体例子（2026-09-22）
+
+- 用户要求对 Plan、Skill、Memory、Plugin 展示真实的提示格式与注入逻辑，并问 Skill 是否有执行轨迹分析。已在 [B5](../topics/b-context-management.md) 增加四类内容的假设任务例子，逐项区分 Context 前缀、通用摘要、最近保留组和显式后置提醒；[B2](../topics/b-compaction.md) 添加入口，证据见 E36。
+- 核心结论：压缩提交时专门生成的后置提醒是已批准 Plan 文件和已读文件状态；Skill catalog、Memory 索引随 Context 前缀持续可见。旧 Skill 正文及执行过程只可能通过最近保留组原文或通用摘要延续；未在生产压缩路径发现 Skill 专属 trajectory 摘要或 checkpoint。Plugin 旧引用由摘要/保留选择决定，新的用户引用才重新解析当前能力。
+- 下次继续时，若用户需要设计迁移建议，可比较“通用摘要续接”与“结构化 Skill 执行状态”的收益、持久化成本及可靠性，明确后者属于我们的设计提案，不是 ZCode 已有机制。本次仍为静态源码研究，未运行目标 Agent/Provider。
+- 验证：本轮为文档与 Skill 草案修改；Skill `quick_validate.py`、变更文件本地链接、`git diff --check`、`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，保留 70 条既有 warning。新增的是文字例子，没有新增 Mermaid 图或运行目标 Agent。

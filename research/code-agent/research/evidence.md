@@ -336,4 +336,14 @@
 - `apps/zcode-cli/packages/core/src/runtime/methods/compact.ts:317-350`、`turn-model-step-usage.ts:54-65`：Auto 与 preflight 可用最近 assistant 的 Provider usage 加后续本地估算；若 usage 代表 Microcompact 后的较小输入，而冷恢复又带回更早原文，存在静态可推导的低估条件。
 - `apps/zcode-cli/packages/core/src/runtime/methods/model-token-limits.ts:17-40`、`turn-model-step.ts:239-252,375-439,499-524,742-806`：preflight 只调 output cap，非正剩余时仍用 baseline；Provider context-exceeded 后尝试 reactive compact，但它可失败、跳过或受保护条件阻断。
 
-支持：[B5](../topics/b-context-management.md) 的 M0–M8 决策图及恢复反弹说明。**尚未运行真实冷恢复或 Provider 超窗实验**；低估及最终报错是源码条件性推论，不宣称必然发生。
+支持：[B5](../topics/b-context-management.md) 的微压缩 ①–⑦ 决策图及恢复反弹说明。**尚未运行真实冷恢复或 Provider 超窗实验**；低估及最终报错是源码条件性推论，不宣称必然发生。
+
+## E36：Plan、Skill、Memory、Plugin 在完整压缩后的具体可见内容
+
+- `apps/zcode-cli/packages/core/src/compact/prompt.ts:14-165`、`runtime/helpers/compact.ts:72-88`：通用摘要 Prompt 要求整理以前的行动、改动、错误和待办；成功后新历史由 Context 前缀、摘要消息、最近保留组和后置提醒组成，没有 Skill 专属轨迹字段。
+- `apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts:484-625`、`runtime/helpers/plan-file-continuity.ts:59-101`、`runtime/helpers/compact-post-reminders.ts:8-95`：后置提醒只显式构建已批准 Plan 文件引用与已读文件状态；实际提示文字、文件数与预算可定位。提醒连同摘要持久化。
+- `apps/zcode-cli/packages/core/src/context/sections/skills.ts:30-70`、`tool/handlers/skill.ts:18-70`：Context Skill catalog 为名称、说明、路径（预算不足退化），调用 Skill 才加载正文并返回 `<skill_content>` 工具结果。旧调用及操作轨迹若在摘要区仅依赖通用摘要输出；最近保留组保留原文。
+- `apps/zcode-cli/packages/core/src/context/sections/memory.ts:8-50`、`context/sections/request-user-context.ts:47-86`、`runtime/methods/context.ts:60-72`：Memory 使用说明与 `MEMORY.md` 索引在 Context 前缀，详情文件需另读；冷恢复重建 Context。
+- `apps/zcode-cli/packages/core/src/plugin-reference/reminder.ts:158-180`、`runtime/methods/plugin-reference.ts:80-149`：Plugin 引用提示列出 live 能力，真实用户新引用才生成；旧提示如何留在模型历史受摘要区/保留组及 boundary 控制。
+
+支持：[B5](../topics/b-context-management.md) 的四类内容对比和假设任务例子。实际提示包装来自源码；示例名称、路径、摘要文本非运行记录。没有在上述生产压缩提交路径看到专门的 Skill 轨迹生成或恢复步骤，不能据此证明其他未检索范围绝无相关实现。
