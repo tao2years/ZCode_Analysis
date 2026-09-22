@@ -7,24 +7,35 @@
 ## 整体模型
 
 ```mermaid
-flowchart LR
-    A[成功 TurnComplete] --> B[后台 extraction scheduler]
-    B --> C[读取 active durable messages]
-    C --> D[扫描 memory manifest]
-    D --> E[受限 memory agent]
-    E --> F[每个事实一个 Markdown]
-    E --> G[更新 MEMORY.md 索引]
-    G --> H[下次 context 初始化加载索引]
-    H --> I[模型按相关性用 Read/Grep/Glob 读取事实文件]
+flowchart TD
+    A["成功完成一轮"] --> B["① 从持久 Session 取当前分支快照"]
+    A --> C["② 同时复制当前 Runtime 模型历史和工具目录"]
+    B --> D{"③ 新区间有合格用户文字<br/>且未直接写记忆？"}
+    D -- 否 --> X["跳过，推进本 Runtime 的提取位置"]
+    D -- 是 --> E["④ 扫描已有事实文件目录<br/>生成提取指令和消息数"]
+    C --> F["⑤ Runtime 历史 + 提取指令<br/>作为 Memory Agent 模型输入"]
+    E --> F
+    F --> G["⑥ 最多 5 次模型请求<br/>工具执行时单独限权"]
+    G -. 模型请求异常或取消 .-> L["提取失败，本次不推进位置"]
+    G --> J{"模型决定保存事实？"}
+    J -- 否 --> K["不写文件，成功返回后推进提取位置"]
+    J -- 是 --> H["⑦ 尝试写事实文件与 MEMORY.md"]
+    H --> M["loop 正常返回即推进位置<br/>不复查是否写成"]
+    H -. 异常抛出 .-> L
+    H --> I["下次 Context 初始化重读索引"]
 ```
 
 项目记忆是文件系统中的长期事实，`MEMORY.md` 只做目录。每个会话默认只自动加载目录，不自动把所有事实文件塞入上下文。
+
+**图中 ① 与 ② 是两份不同数据，旧版图错误地画成“持久快照直接送 Memory Agent”。**持久 Session 快照用于检查提取 cursor、是否已有直接写入、是否有合格用户文字以及给提示填消息数；实际模型输入取调度瞬间复制的**当前 Runtime 历史**，再附提取提示。若主历史已被完整压缩，Memory Agent 收到的是压缩后的有效历史，而不是持久 Session 里所有旧消息原文。[持久快照与调度](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts) · [Runtime 输入快照](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-agent.ts) · [提示构造](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts)
 
 ## 1. 启用条件与作用域
 
 只有 memory enabled、`use !== false`、存在 `cliStorageRoot` 且 task type 属于主 memory 类型时启用。root 由 `workspaceIdentity` 优先、否则规范化 workspace path 生成 SHA-256 前 16 位 hash，位于 CLI storage 的 `memories/projects/<slug-hash>/memory`。[project-memory.ts](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory.ts) [project-root.ts](../../../apps/zcode-cli/packages/core/src/memory/project-root.ts)
 
 这意味着项目记忆与 workspace identity 绑定，不跟当前 shell `cd` 改变；冷恢复还会先从持久 session 恢复 workspace identity，再初始化 Memory root。[resume.ts:82-119](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts)
+
+**产品入口改变实际启用状态。**CLI 基础配置默认 `features.memory=true`、`memory.use=true`；桌面/Web 产品设置 `memoryEnabled` 默认 `false`，Host 将该值交给 Session 创建/恢复，关闭值覆盖 CLI 默认。即使开关打开，还要满足 CLI storage root、支持的 task type 与 FileSystemPort；自动提取另要求本地 workspace、SessionStore，且该轮未指定 `memoryExtraction: "skip"`。闲时自动执行轮就显式跳过提取。不能把 CLI 默认与桌面产品默认混写成“Memory 默认开启/关闭”。[CLI 默认](../../../apps/zcode-cli/packages/contracts/src/config/index.ts) · [产品设置](../../../packages/shared/src/validationAppSettings.ts) · [Host 传参](../../../packages/services/src/node.ts) · [Session 覆盖](../../../apps/zcode-cli/packages/bootstrap/src/zcode-protocol/server-operations.ts) · [闲时跳过](../../../packages/desktop/src/host/index.ts)
 
 subagent profile 另有 `user`、`project`、`local` 三种 persistent memory root，分别落到用户存储或工作区 `.zcode` 目录。它通过 profile 配置加载，不应把其内容和主 Agent project memory 默认视为共享。[persistent-memory.ts](../../../apps/zcode-cli/packages/core/src/subagent/persistent-memory.ts)
 
@@ -35,6 +46,8 @@ Context 的 system 部分只注入 Memory 使用规则、文件格式、去重�
 Index 最多加载 200 行和 25,000 字符，超出时截断并追加警告，要求每条保持一行、详细内容放到事实文件。[index-content.ts](../../../apps/zcode-cli/packages/core/src/memory/index-content.ts)
 
 因此召回是两段式：索引提示“有哪些事实”，模型再依据任务使用 Read/Grep/Glob 打开相关 Markdown。仓库当前没有向量数据库、embedding 检索或自动把全部 memory body 注入请求的证据。
+
+`MEMORY.md` 在 `ensureContextInitialized` 时读取并放入 Runtime 的 `memoryIndexContent` 快照；后续 Context 前缀重建复用该字符串，不重新读磁盘。后台提取或另一 Session 写入新事实后，当前热 Runtime 的自动索引可能仍旧；冷恢复/新 Runtime 重新初始化才自然得到新索引。模型仍可通过显式 Read 访问磁盘内容。这里是已追踪调用路径的静态结论，不是跨进程缓存一致性实测。[初始化加载](../../../apps/zcode-cli/packages/core/src/runtime/methods/context.ts) · [前缀重建](../../../apps/zcode-cli/packages/core/src/runtime/methods/context-refresh.ts)
 
 ## 3. 直接写入与权限
 
@@ -50,25 +63,33 @@ Write/Edit 会在合法 memory Markdown 缺少来源时补 `metadata.node_type: 
 
 调度只在本地 workspace、具备 SessionStore 和 FileSystemPort、未关闭且 extraction 未禁用时工作。它按当前 active branch 截取到本轮 boundary 的 durable messages，避免随后分叉或新消息改变本次输入。[project-memory-extraction.ts:28-80](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
 
-Scheduler 串行执行并 coalesce 为最新 pending snapshot。只有成功/no-op 才推进 cursor；错误不推进，因此后续机会仍可覆盖尚未成功提取的区间。关闭 runtime 会 abort 正在执行和待执行任务；普通 close 最多有界等待 60 秒。[extraction.ts:85-180](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [project-memory-extraction.ts:83-110](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
+Scheduler 串行执行并 coalesce 为最新 pending snapshot。判定为 skip 时立即推进 cursor；实际执行后只有 success/no-op 推进，error/aborted 不推进，因此后续机会仍可覆盖尚未成功提取的区间。关闭 runtime 会 abort 正在执行和待执行任务；普通 close 最多有界等待 60 秒。[extraction.ts:85-180](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [project-memory-extraction.ts:83-110](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
+
+**Cursor 是 Runtime 内存状态，不是持久进度。**Scheduler 创建时 `cursor` 为 `undefined`；源码未在 resume 中恢复它。冷恢复后的首次成功 turn 若触发提取，持久快照会按当前 active branch 拿到较长历史，计数和合格性判断可覆盖旧轮；但 Memory Agent 真正拿到的仍是当前 Runtime 的有效模型历史，可能已受 compact boundary 约束。这两边不是同一个“自 cursor 起的消息数组”。由此存在重复提取旧事实、或提示声称“最近 N 条”而请求里没有 N 条旧原文的可能；是否实际发生取决于模型输出和当时历史。[cursor 创建与计数](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) · [持久快照](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts) · [模型输入](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-agent.ts)
 
 **可复现的队列状态：**S1 正在提取时，S2、S3 先后完成 durable snapshot，scheduler 只保存最新 pending=S3；S1 结束后处理 S3，S2 不单独调用模型。若 S1 返回 success/no-op，cursor 前进到 S1 的 boundary，S3 只判断其后消息；若 S1 抛错或返回失败，cursor 不动，S3 的快照仍可能覆盖 S1 区间。若 S3 里已有主 Agent 的 Write/Edit 指向 memory root，则本次自动提取跳过并推进到 S3 boundary；若没有至少 3 个由空白分隔的词组成的非 synthetic user 文本，也跳过。这个门槛按 `split(/\s+/)` 计词，不是自然语言 tokenizer；中文无空格短句可能达不到三词。上述是源码规则推演，不代表某次模型提取实际发生。[调度与 cursor](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) · [快照构造](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
 
-若区间内已由主 Agent 直接 Write/Edit memory，自动提取跳过，避免重复写；没有至少 3 个词的非 synthetic user prose 也跳过。[extraction.ts:67-83](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [extraction.ts:220-303](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts)
+若区间内已有主 Agent 指向 memory root 的 Write/Edit tool part，自动提取跳过，避免重复写；**该检测只看工具名、路径和包含关系，没有检查 tool part 的完成/成功状态**，所以失败或被拒绝但已记录的写调用也可能抑制本轮提取。没有至少 3 个词的非 synthetic user prose 也跳过。[判定实现](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts)
 
 ## 5. 受限 Memory Agent
 
 提取前扫描最多 200 个事实文件，读取每个文件前 30 行 frontmatter，按 mtime 排序，并将 filename、type、description 提供给 agent 用于查重。单个坏文件或 symlink 不阻断其余 manifest。[manifest.ts](../../../apps/zcode-cli/packages/core/src/memory/recall/manifest.ts)
 
-Memory Agent 最多 5 turns，只允许 Read/Grep/Glob、只读 Bash，以及 memory root 内的 Edit/Write 和受限 rm；MCP、Agent、一般写 Bash 被拒绝。提示要求只根据最近消息提取，不再读取源码验证。[project-memory-extraction.ts:112-174](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts) [memory-agent-loop.ts](../../../apps/zcode-cli/packages/core/src/memory/memory-agent-loop.ts)
+Memory Agent 最多 5 turns。**模型可见的工具目录沿用主 Runtime 的 `getTools(model)`，并没有预先裁成白名单；真正的执行限制在 Memory Agent tool-call policy**：Read/Grep/Glob、只读 Bash、memory root 内的 Edit/Write 与受限 rm 可执行，MCP、Agent、一般写 Bash 被拒绝。这意味着不允许的工具 schema 仍可能占其模型请求的上下文，也可能被模型选中后才收到拒绝结果。提示要求只根据最近约 N 条消息提取、不再读取源码验证；`N` 来自持久快照的 cursor 计数，代码没有把 Provider 消息裁成严格最近 N 条。这里的“只看最近 N 条”是提示词约束，不是输入隔离。[捕获历史与工具](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-agent.ts) · [提取提示](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) · [模型请求与执行策略](../../../apps/zcode-cli/packages/core/src/memory/memory-agent-loop.ts)
 
-这个边界避免后台提取演变成第二个通用 Agent，但也意味着它可能把用户陈述按原意保存，而不会独立核实事实。
+Memory Agent 每步会按模型媒体能力和预算投影，辅助模型输出上限为 5,000 token；它没有进入普通 turn 的 micro/auto/reactive compact 循环。若其输入因主历史、工具 schema 或后续工具结果超窗，当前路径把模型异常交给提取执行失败处理，cursor 不推进；不能套用主 Agent 的 Reactive compact 兜底。[Memory loop](../../../apps/zcode-cli/packages/core/src/memory/memory-agent-loop.ts) · [辅助输出预算](../../../apps/zcode-cli/packages/core/src/model/auxiliary-model-options.ts) · [失败状态与 cursor](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
+
+**调度 success 不等于事实已落盘。**`executeProjectMemoryExtraction` 在 Memory Agent loop 正常返回后直接报告 success；loop 内被策略拒绝的工具调用会变成模型可见的 error tool result，其他工具失败也可能由模型在后续轮自行处理。若模型最终不写文件、写失败后结束，或达到 turn 上限，scheduler 仍可能推进 cursor；当前路径没有读取最终文件状态来确认 `MEMORY.md` 与事实文件均成功更新。这是从返回值和状态转换得出的静态结论，尚未构造运行案例。[执行状态](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts) · [工具结果和结束条件](../../../apps/zcode-cli/packages/core/src/memory/memory-agent-loop.ts) · [cursor 提交](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts)
+
+还有一处条件不一致：提取提示要求模型遵循“上方 system prompt 的 Memory section”，但 `customSystemPrompt` 分支会跳过默认动态 system 段，包括 Memory section；Memory 索引的 meta-user 入口仍可构造。若这样的配置同时启用 Project Memory，提示依赖的格式/筛选规则并非由该 section 提供。源码可确认两处分支条件，实际模型会怎样补足不能静态保证。[提取提示](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) · [Builder 分支](../../../apps/zcode-cli/packages/core/src/context/builder.ts)
+
+这个边界限制**执行能力**，没有同等限制**模型可见的历史与工具目录**；它也可能把用户陈述按原意保存，而不会独立核实事实。
 
 ## 6. 更新、冲突与过期
 
 当前实现中，去重、冲突修正和删除主要由 prompt 规则驱动：写前查看已有文件，更新同主题事实，不创建重复；若 memory 与当前仓库或资源冲突，以当前观察为准，并更新或删除旧 memory。manifest 的 mtime 只用于排序，不是 TTL。[memory.ts:42-49](../../../apps/zcode-cli/packages/core/src/context/sections/memory.ts) [persistent-memory-prompt.ts:108-132](../../../apps/zcode-cli/packages/core/src/subagent/persistent-memory-prompt.ts)
 
-更细看可以分成三层。**同一 Runtime 内**的 extraction scheduler 串行执行、只保留最新 pending snapshot，cursor 在成功或 no-op 后推进；它阻止同一 scheduler 自己并行写。**同一文件**的 Edit/Write 要求先有完整 Read，写前再读并比较 revision/mtime/大小；写入时向 FileSystemPort 传入 `expectedRevision` 且采用 atomic write。Node adapter 在写前 `stat` 对比 revision，不匹配会报 `stale_write`。[extraction.ts:85-180](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [write.ts:80-145](../../../apps/zcode-cli/packages/core/src/tool/handlers/write.ts) [edit.ts:420-525](../../../apps/zcode-cli/packages/core/src/tool/handlers/edit.ts) [fs/index.ts:292-320](../../../apps/zcode-cli/packages/adapters/src/fs/index.ts) [fs/index.ts:473-485](../../../apps/zcode-cli/packages/adapters/src/fs/index.ts)
+更细看可以分成三层。**同一 Runtime 内**的 extraction scheduler 串行执行、只保留最新 pending snapshot，cursor 在 skip、success 或 no-op 后推进；它阻止同一 scheduler 自己并行写。**同一文件**的 Edit/Write 要求先有完整 Read，写前再读并比较 revision/mtime/大小；写入时向 FileSystemPort 传入 `expectedRevision` 且采用 atomic write。Node adapter 在写前 `stat` 对比 revision，不匹配会报 `stale_write`。[extraction.ts:85-180](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [write.ts:80-145](../../../apps/zcode-cli/packages/core/src/tool/handlers/write.ts) [edit.ts:420-525](../../../apps/zcode-cli/packages/core/src/tool/handlers/edit.ts) [fs/index.ts:292-320](../../../apps/zcode-cli/packages/adapters/src/fs/index.ts) [fs/index.ts:473-485](../../../apps/zcode-cli/packages/adapters/src/fs/index.ts)
 
 这些是有用的**乐观防护**，但不是跨 Runtime 事务：两个会话可以各自持有 scheduler 并读取同一版本；Node adapter 的 revision 检查和最终 rename 之间没有本文件级锁，两个写者仍可能在检查后先后覆盖。新文件没有 `expectedRevision`；`MEMORY.md` 与事实文件也不是一个原子提交。去重、语义合并和过期主要由 prompt 约束，manifest 的 mtime 排序不是 TTL。[project-memory-extraction.ts:75-80](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts) [fs/index.ts:292-320](../../../apps/zcode-cli/packages/adapters/src/fs/index.ts) [fs/index.ts:700-735](../../../apps/zcode-cli/packages/adapters/src/fs/index.ts) [memory.ts:25-49](../../../apps/zcode-cli/packages/core/src/context/sections/memory.ts)
 
@@ -84,6 +105,6 @@ Memory Agent 最多 5 turns，只允许 Read/Grep/Glob、只读 Bash，以及 me
 
 ## 验证与未知
 
-- 已静态追踪 root、加载、直接写权限、origin stamping、自动提取、manifest 与受限 agent。
+- 已静态追踪 root、加载、直接写权限、origin stamping、自动提取、manifest、Memory Agent 的实际模型输入与执行时限权；旧版把持久快照误写成直接模型输入，现已修正。
 - 未实际启用 Memory、未调用模型提取、未验证多会话并发冲突。
 - 未找到程序化 TTL/expiry；该结论仅限所查主 Agent project memory 路径。

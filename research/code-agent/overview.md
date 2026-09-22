@@ -135,7 +135,7 @@ sequenceDiagram
 
 工具大结果也体现分层：进程采集层可能已限制 inline、tail 和磁盘文件，通用 ToolExecutor 再对 handler 生成的模型内容执行 truncate 或 artifact。模型看到 preview 与路径；冷恢复保留当时的 `modelContent`，不会自动把全文重新注入。[E22]
 
-项目 Memory 使用文件索引与按需读取：每次 Context 初始化只注入 `MEMORY.md` 索引，具体事实由模型按需 Read；成功 turn 后可由受限后台 Agent 根据 active durable messages 更新事实文件。写文件有先读后写、revision 检查和原子替换，减少陈旧覆盖；语义去重及跨 Runtime 事务一致性并非这套机制的保证。[E21、E25]
+项目 Memory 使用文件索引与按需读取：每次 Context 初始化只注入 `MEMORY.md` 索引，具体事实由模型按需 Read；成功 turn 后的后台提取用 active durable messages 判定是否运行及填入消息数，模型实际消费的是调度时复制的 Runtime 历史和提取指令。写文件有先读后写、revision 检查和原子替换，减少陈旧覆盖；语义去重及跨 Runtime 事务一致性并非这套机制的保证。[E21、E25、E38]
 
 Context 管理是多级策略：Skills metadata 与 Memory index 控制常驻内容，完整正文按需读取；每步请求有输出 preflight、Provider usage/估算驱动的自动压缩、独立 40 MiB 媒体预算和 Provider cache marker。媒体预算保护最新真实用户附件，其余按从新到旧的完整媒体块选择，放不下的块变文字占位；Microcompact 则按旧合格工具批次整条替换结果，两者都不是在一条内容中间按 Token 切片。不同预算的单位与所有者不能合并为一个“token 裁剪器”。详见[上下文管理全貌](topics/b-context-management.md)。[E27、E32、E34]
 

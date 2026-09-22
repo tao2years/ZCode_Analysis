@@ -111,3 +111,11 @@
 - 关键纠偏：桌面/Web 的 `memoryEnabled` 产品设置默认 `false`，CLI 基础配置 `features.memory=true` 不能反推产品已启用；microcompact 函数每步调用，但 `enabled` 需要显式 `true`，已查常规配置未设置；`SessionMemory` compact trigger 暂只见枚举/映射；`legacy` 预算字符串被 Runtime 归一为 `preflight-v1`。这些是当前静态源码路径的结论，不代表所有外部调用方或用户实时配置。
 - 仍未做全仓所有功能灰度盘点，也未启动目标 Agent/Provider。后续用户追问某项时沿生产调用链校验，再更新表格和受影响专题；不要以关键字搜索缺席证明绝不存在。
 - 验证：修改文档的本地链接、Skill 结构校验和 `git diff --check` 通过；本地 `tsc -b` 通过，`oxlint` 为 0 error、70 条既有 warning。上述检查不构成目标 Agent 的运行验证。
+
+## Memory 与 Harness 生产链纠偏（2026-09-22）
+
+- 用户指出上一轮仍过浅。本轮改用“生产者 → 判定数据 → 实际消费者 → 写入/恢复”的核对法，修正旧图把 durable Session 快照当成 Memory Agent 模型输入的错误。真实请求继承调度瞬间的 Runtime 历史和完整工具 schema；durable 快照用于合格性、cursor 和消息数。细节见 [B3](../topics/b-memory.md) 和 E38。
+- 由此识别三类条件性问题：热 Runtime 的 `MEMORY.md` 自动索引不会因后台写入立即刷新；提取 cursor 不持久化，冷恢复后可能重扫旧区间；提取 loop 正常结束可推进 cursor，即便没有验证事实文件已落盘。主 Agent 的 Write/Edit 跳过检测也不检查 tool part 成功状态。这些均为静态控制流结论，未运行目标 Agent。
+- `# Harness` 是默认/工作流身份的模型指令，权限、Hook、并行由各自代码路径实现；自定义 system prompt 跳过默认动态段。B1 已按提示声明与执行边界逐条对照。Skill 加入“判定快照与模型输入必须分离追踪”的验收规则；B3 状态下调为待读者复核。
+- 下次继续优先拿用户提出的具体问题沿实际请求和状态链完整回答，再按受影响专题更新；不要把本次 E38 的发现误报为全仓 Context/Harness 穷尽审计。源码研究基线仍为 `872ad960de7ec172591f7e1952f7849229f94521`。
+- 本轮文档与 Skill 验证：`quick_validate.py` 通过；10 个改动 Markdown 的本地相对链接均存在；B3 新 Mermaid 图在本机 Chrome 中通过解析并渲染 SVG；`git diff --check` 通过。按 `package.json` 的 typecheck 参数运行本地 `tsc -b` 通过，本地 `oxlint --quiet` 退出 0（0 error、70 个既有 warning）。第一次裸 `tsc -b` 因仓库根目录无 `tsconfig.json` 退出 1，已改用项目实际参数重跑成功。以上均非目标 Agent/Provider 实测。

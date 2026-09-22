@@ -25,6 +25,20 @@ Builder 的主要顺序是：CLI/product prefix；自定义或默认身份；动
 
 **Memory 提示也要拆成两层。**`# Memory` system 段告诉模型事实文件格式、类型、链接、写后更新 `MEMORY.md`、写前查重和冲突修正；它只在 `memoryRoot` 存在且没有被自定义 system prompt 跳过时加入。`MEMORY.md` 索引作为 meta-user request context 另行注入；具体事实正文不因这段提示自动进入模型。去重与语义冲突是提示词要求，不能冒充硬性事务保证。[Memory 提示](../../../apps/zcode-cli/packages/core/src/context/sections/memory.ts) · [索引入口](../../../apps/zcode-cli/packages/core/src/context/sections/request-user-context.ts) · [Builder 条件](../../../apps/zcode-cli/packages/core/src/context/builder.ts)
 
+### Harness 逐条对照：模型指令与代码边界
+
+默认身份中的 Harness 被标记为 `stable` system 段；Builder 将 CLI prefix、稳定身份、动态 system 分成最多三条 system message，并分别标 cache marker。它与 Memory 索引（meta-user attachment）不是同一角色；进入 Provider 前仍需经历 runtime entry 投影。[身份 section](../../../apps/zcode-cli/packages/core/src/context/sections/identity.ts) · [Builder 装配](../../../apps/zcode-cli/packages/core/src/context/builder.ts)
+
+| `# Harness` 告诉模型什么 | 对应实际边界 | 不能据提示词推断什么 |
+| --- | --- | --- |
+| 普通文字作为 Markdown 展示 | 这是输出格式指令，文字由产品 UI/终端消费。 | 不能用它证明所有产品表面都是终端。 |
+| 工具受权限模式约束；拒绝后调整做法 | 工具执行前由权限流程判定，拒绝也可能来自配置/策略。 | 不能把每个 denied 都写成用户现场点击拒绝。[权限流程](../../../apps/zcode-cli/packages/core/src/tool/executor/permission-flow.ts) |
+| 运行中可能有 system 提醒；Hook 输出当作反馈 | Hook `additionalContexts` 转为 `hook_context` runtime attachment，再由投影形成模型可见消息；它不是用户亲自发的原始消息。 | 不能把 Hook 内容等同持久真实 user query。[Hook 注入](../../../apps/zcode-cli/packages/core/src/runtime/methods/hooks.ts) |
+| 独立工具调用可在一次响应里并行 | 模型可以提出多次调用；实际调度、依赖和权限由工具执行层决定。 | 不能把提示语当成“任何工具必并行”的实现保证。[调度入口](../../../apps/zcode-cli/packages/core/src/tool/executor/batch-runner.ts) |
+| 引用源码使用 `file_path:line_number` | 指导模型输出可定位引用。 | 不能据此证明 UI 点击行为或每条引用都有效。 |
+
+`# Harness` 只是默认交互身份和工作流身份复用的**一小段**。模型最终看到的约束还受动态行为、Session guidance、Memory、用户/项目指令、运行时提醒和工具 schema 影响；只分析 `identity.ts` 会漏掉这些来源。[Builder 决策](../../../apps/zcode-cli/packages/core/src/context/builder.ts) · [动态段](../../../apps/zcode-cli/packages/core/src/context/dynamic-sections.ts) · [每步提醒](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts)
+
 组装后，stable/dynamic system sections 成为 system messages；Skills 和其他请求上下文成为带 source 的 meta-user attachments。[builder.ts:231-306](../../../apps/zcode-cli/packages/core/src/context/builder.ts) `buildContextHistoryEntries` 再把两者转换为 runtime entries。[context-history-entries.ts](../../../apps/zcode-cli/packages/core/src/runtime/methods/context-history-entries.ts)
 
 因此“上下文”不等于单一 system string：部分指令在 system role，部分以经过标记的 user-role system reminder 进入请求，工具 schema 则独立存在。

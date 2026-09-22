@@ -356,3 +356,16 @@
 - `apps/zcode-cli/packages/core/src/context/builder.ts:85-225`、`runtime/methods/context-refresh.ts:7-54`：Context 的 system/meta-user 条件分支、custom prompt 与 workflow 身份差异、Skill 工具可用性门槛及前缀重建。
 
 支持：[B5](../topics/b-context-management.md) 的主图回环、08 子流程和 Context 前缀条件。此前 B5 虽可全文搜索到 Reactive 一行表格，**整体流程验收仍不合格**；这次修订的是可发现性和决策链，尚未由用户复核，也未运行目标 Agent/Provider。
+
+## E38：Memory 提取的判定快照与实际模型输入分离
+
+- `apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts:32-81,115-170`：调度时先复制 Runtime entries、工具目录和读文件状态，再异步读取当前分支 durable messages；后者供 eligibility/cursor/消息数判断，提取请求由前者和新提示组成。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-agent.ts:32-96`：`providerEntries` 来自当前 `messageHistory`，`tools` 来自 `getTools(model)`；构建请求时没有按 durable cursor 截取历史。
+- `apps/zcode-cli/packages/core/src/memory/extraction.ts:42-80,85-124`：最近约 N 条是提示中的消息数，不是输入裁切；skip、success、no-op 推进 Runtime 内存 cursor，error/aborted 不推进；scheduler 初始 cursor 未从持久状态恢复。
+- `apps/zcode-cli/packages/core/src/memory/extraction.ts:228-296`：主 Agent “已直接写 Memory”的跳过条件只识别 Write/Edit tool part 与 memory root 路径，没有核对该调用是否成功；若跳过，cursor 仍推进。
+- `apps/zcode-cli/packages/core/src/memory/memory-agent-loop.ts:45-97,121-190`：每步模型请求发送捕获的工具 schema，实际权限在 tool-call policy 检查；循环不经过主 turn 的 micro/auto/reactive compact。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts:115-170`：后台 loop 正常返回即报告 success，没有核对最终文件是否更新；结合模型返回零工具调用、拒绝工具结果或达到 turn 上限，success 与记忆已落盘不是同义词。
+- `apps/zcode-cli/packages/core/src/runtime/methods/context.ts:31-73` 与 `runtime/methods/context-refresh.ts:7-54`：`MEMORY.md` 索引在 Context 初始化读入，后续前缀重建复用 Runtime 快照。
+- `apps/zcode-cli/packages/core/src/context/builder.ts:95-174` 与 `memory/extraction.ts:42-65`：自定义 system prompt 跳过默认 Memory section，但提取提示仍引用该 section；这是配置组合下的静态不一致，未做模型实测。
+
+支持：[B3](../topics/b-memory.md)、[B1](../topics/b-message-context-and-provider-input.md)、[B5](../topics/b-context-management.md) 和 [Overview](../overview.md)。冷恢复后重扫、热索引滞后、工具 schema 上下文成本是这些调用关系的静态推论；未运行目标 Agent 或 Provider。

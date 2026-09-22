@@ -29,7 +29,7 @@
 | 消息重建、Context 与 Provider 投影      | 源码专题               | 已补 Harness/Memory 提示，待读者复核 | 最终 wire 精确形态不在本批证据内 | [B1](topics/b-message-context-and-provider-input.md) |
 | 上下文预算、跨 Session 按需读取、缓存与媒体投影 | 源码专题 | 已补主链路与启用状态，待读者复核 | Provider 精确 token 与 cache 命中未知；`SessionMemory` trigger 未见核心发起点；未作全仓灰度盘点 | [B5](topics/b-context-management.md) |
 | 完整 compact、microcompact、reactive    | 源码专题               | 静态追踪完成，整体呈现待复核 | B2 有 Reactive 细节；B5 的发现路径此前不足，当前已补图。Provider 外部行为未验证 | [B2](topics/b-compaction.md)                         |
-| Project Memory 与跨会话冲突             | 源码专题               | 静态深挖完成 | 桌面/Web 产品开关默认关闭；无法由源码保证所有竞争时序的最终结果 | [B3](topics/b-memory.md) |
+| Project Memory 与跨会话冲突             | 源码专题               | 已纠正模型输入与调度快照混淆，待读者复核 | 热 Runtime 索引滞后与重启重扫为静态推论；未运行后台提取或并发实验 | [B3](topics/b-memory.md) |
 | 大结果可恢复性与 artifact 生命周期      | 源码专题               | 静态深挖完成 | 仓库外清理、具体远端路径可达性未知       | [B4](topics/b-large-tool-results.md)                 |
 | Desktop/mobile 交付语义                 | 关键契约概览           | 待深入       | 完整 owner/lease、跨 Host 路由和故障注入 | [Overview](overview.md)                              |
 | Skills 与项目指令                       | 关联机制概览           | 待专题       | 完整 Skill 加载、预算与冲突未深挖        | [B1](topics/b-message-context-and-provider-input.md) |
