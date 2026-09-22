@@ -72,3 +72,4 @@
 - 特别核对：Microcompact 用本地投影估算；Auto 优先用 Provider usage 基线加增量，因此 Microcompact 清掉已落在旧 usage 基线内的内容时，Auto 的触发计数未必同步下降。该点是源码推论，未作真实 Provider 验证。
 - 本轮没有改目标仓库代码或运行目标 Agent。后续问答应先在对应专题内补可计算实例和源码边界，积累到适当时机再回写 Overview 与 Skill；不要把假设实例写成目标仓库运行事实。
 - 本轮验证：freshness 通过；B5 的 3 个 Mermaid 图在本机 Chrome 中用仓库安装的 Mermaid 解析成功（未做截图级视觉检查）；Skill `quick_validate.py` 通过；本地 Markdown 链接与 `git diff --check` 通过；`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，仍为 70 条既有 warning、0 error。
+- 用户继续追问“开启后是否每轮都裁剪、哪些工具如何处理、Prompt Cache 是否受影响”。B5 的 02 新增连续两个 model step 的完整例子，明确每步检查、满足触发后扫描、收益够才写入的三层；并写出缓存前缀可能失配、marker 重设与实际命中未知的边界。证据见 E31；Skill 的深度验收同步加入连续步骤与缓存权衡要求。

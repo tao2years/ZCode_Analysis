@@ -290,3 +290,13 @@
 - `apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts:180-238,267-305,308-480,517-625,635-690`、`compact/prompt.ts:1-165`：摘要输入、Prompt、两层重试、持久化和历史替换。
 
 支持：[B5](../topics/b-context-management.md) 的 M1–M6/A1–A6 小流程、阈值演算及分组实例。限制：例子使用假设消息和数字，没有运行目标 Agent 或 Provider；Provider 实际 tokenizer/cache 行为仍未知。
+
+## E31：Microcompact 的逐步动作与 Prompt Cache 边界
+
+- `apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts:67-103,168-213`：每个 model step 前检查 Microcompact；Auto compact 与动态提醒后才构造实际 Provider 请求。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:90-150`：Microcompact 以 `applyCacheControl:false` 投影内存 entries；成功后只把选中 tool result 的 content 按 ID 回写 runtime entries。
+- `apps/zcode-cli/packages/core/src/compact/microcompact.ts:77-168,171-256`：先估算、触发、分候选组、保留最近组、替换、重估节省；低于最低收益恢复原消息。已清标记被排除，不会在下一步重复清理。
+- `apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts:73-115`：成功才替换 canonical history 与当前 request entries；跳过时只记录 debug。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts:45-99,299-334`、`apps/zcode-cli/packages/adapters/src/model/transform.ts:499-513`：最终请求重投影后设置 ephemeral cache marker，再映射到 Provider 选项。
+
+支持：[B5](../topics/b-context-management.md) 的连续两步例子和缓存影响。缓存失配从首个被替换结果开始是请求内容对比的静态推论；具体 Provider 命中率和计费需运行数据，当前未实测。
