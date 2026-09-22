@@ -327,3 +327,13 @@
 - `apps/zcode-cli/packages/core/src/memory/extraction.ts:67-180,220-303`：运行中只保留最新 pending snapshot、cursor 推进条件、直接写入跳过与三词用户文本门槛。支持 [B3](../topics/b-memory.md)。
 
 以上例子均标为假设性源码推演，不表示运行目标 Agent、Provider 或命令后的观察。
+
+## E35：Microcompact 冷恢复反弹与超窗兜底边界
+
+- `apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts:24-115`、`compact/microcompact.ts:77-256`：每个 model step 用本轮 entries 重新投影、计算 M 并筛选旧工具结果；成功仅回写运行时历史及本轮 entries。
+- `apps/zcode-cli/packages/core/src/runtime/methods/resume.ts:130-190`、`agent/session-history-hydrator.ts:54-199`、`agent/compact-session.ts:4-46`：冷恢复从持久 Session tool part 重建有效历史及上次 assistant 完成时间；完整 compact boundary 会限制有效历史，Microcompact 的运行时替换不作为恢复后的内容来源。
+- `apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts:67-103`：下一次模型步按 Microcompact → Auto compact 顺序执行，恢复动作本身不执行普通 Provider 请求。
+- `apps/zcode-cli/packages/core/src/runtime/methods/compact.ts:317-350`、`turn-model-step-usage.ts:54-65`：Auto 与 preflight 可用最近 assistant 的 Provider usage 加后续本地估算；若 usage 代表 Microcompact 后的较小输入，而冷恢复又带回更早原文，存在静态可推导的低估条件。
+- `apps/zcode-cli/packages/core/src/runtime/methods/model-token-limits.ts:17-40`、`turn-model-step.ts:239-252,375-439,499-524,742-806`：preflight 只调 output cap，非正剩余时仍用 baseline；Provider context-exceeded 后尝试 reactive compact，但它可失败、跳过或受保护条件阻断。
+
+支持：[B5](../topics/b-context-management.md) 的 M0–M8 决策图及恢复反弹说明。**尚未运行真实冷恢复或 Provider 超窗实验**；低估及最终报错是源码条件性推论，不宣称必然发生。

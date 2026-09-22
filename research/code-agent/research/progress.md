@@ -81,3 +81,10 @@
 - 已复核并修订 A1/A2/B1/B2/B3/B4：A1 补 busy/guide/queue/reject 的判定顺序；A2 补拓扑 level、并发组和按 ID 汇合；B1 补 Provider 投影步骤与 40 MiB 媒体选择；B2 修正 Auto/Reactive 摘要超窗和 manual 丢旧组的差异；B3 补 memory extraction 的 pending 合并/cursor 场景；B4 补通用 UTF-8 字节裁剪、artifact preview、POSIX Bash 与 pipe 双路径的小流程。证据见 E33/E34，Overview 与 synthesis 只回写受影响的系统结论。
 - 本轮文档例子仍是源码规则的假设性推演，没有启动目标 Agent/Provider，也未实测远端缓存或 artifact 生命周期。后续细化优先从用户新问题所在机制下手，并自动扫描相邻专题同类缺口；尚未以该新标准全量复核 owner/lease、子 Agent、Hook/Skill 全链路等未专题研究范围。
 - 验证结果：本轮 11 张研究图在本机 Chrome 中用仓库 Mermaid 完成解析及 SVG 渲染；Skill `quick_validate.py`、21 个 Markdown 文件的本地链接、`git diff --check`、`corepack pnpm typecheck` 均通过；`corepack pnpm lint` 退出 0，仍是 70 条既有 warning、0 error。研究仍未运行目标 Agent/Provider，修订质量尚待用户继续校准。研究目录的 [Skill 试用记录](skill-trial.md) 已把原“深入实现通过”更正为“初版不足、修订待复核”。
+
+## Microcompact 图与冷恢复反弹校准（2026-09-22）
+
+- 用户进一步明确：**图自身**至少写触发式及变量、旧结果扫描方向、合格对象、完整替换文本和收益提交条件；持久化差异放在图下解释。已重画 [B5 的 Microcompact 子流程](../topics/b-context-management.md)；E35 保留恢复路径证据，Skill 的模板/证据标准和[读者约定](reader-contract.md)同步固化这一粒度。
+- 冷恢复反弹结论：仅做 Microcompact 时，SQLite 原 tool part 未改；下一次冷恢复会重建它们，下一次模型步再依次尝试 Microcompact、Auto compact。Auto 优先使用最近 Provider usage，若它反映清理后输入而恢复带回更早全文，可能低估；output preflight 不硬阻断超窗，Provider 报错后 Reactive compact 仍可失败。此为静态推论，**尚未实测冷恢复或 Provider**。
+- 下次继续时先检查文档及 Skill 的 diff，核对当前分支与推送状态；如果用户继续追问恢复风险，可用假设时间轴和 token 数再推一次，并明确哪些状态已经完整 compact。相邻 B2/B1 的估算与恢复表述也应保持与 B5 一致。
+- 本次校验：11 张 Mermaid 图在本机 Chrome 中用仓库 Mermaid 解析并渲染 SVG 成功；变更 Markdown 的本地链接检查、Skill `quick_validate.py`、`git diff --check`、`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，仍有 70 条已有 warning。未启动目标 Agent、未运行真实冷恢复或 Provider 超窗。

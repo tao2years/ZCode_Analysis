@@ -91,6 +91,8 @@ Reactive 不是普通的“阈值达到就摘要”。Provider **抛出** contex
 
 Microcompact 不生成摘要，也不截取单条工具结果的头尾；满足空闲或 Token 条件后，按白名单过滤、保留最近 5 个**合格工具调用批次**，把更旧合格结果的**整个 content** 替换为固定标记。成功写入 runtime history 和当前 request entries，不回写持久 tool part。触发公式、每条消息的估算方法、候选谓词、整批收益门槛、可复算数字及 Prompt Cache 影响统一见 [B5 的 Microcompact 实现级说明](b-context-management.md)。这里不另存一份可能漂移的简化算法。[microcompact.ts:77-256](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts)
 
+仅清运行时也意味着**冷恢复可使旧 tool part 全文重新进入有效历史**；下一次模型步会重新尝试 Microcompact、Auto，但 Auto 的最近 Provider usage 基线可能仍反映清理后的较小输入。输出预算 preflight 不是输入超窗硬闸门，Reactive compact 可失败。这一条件性风险和源码边界见 [B5 的恢复反弹分析](b-context-management.md) 与 [E35](../research/evidence.md)；未作真实 Provider 验证。
+
 ### 假设示例：压缩后的请求
 
 假设历史为 Prefix + R1 + R2 + R3，auto 选择保留 R3。summary 请求接收 Prefix + R1 + R2；成功后新的 runtime history 为 Prefix + Summary + R3 + reminders。冷恢复从 boundary 找到 Summary，再按 preserved segment 将 R3 插回。该示例仅用于解释选择和重建，不代表真实 token 数或实际运行结果。

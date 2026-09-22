@@ -55,29 +55,30 @@ Context 初始化从 `ContextSourcePort` 得到指令/环境快照，并加载 S
 
 这 9 个工具共享**同一条结果级规则**，没有 `Read` 留文件头、`Bash` 留日志尾之类的专用算法。被替换的是模型对话中那条旧结果的 content，不是被读文件、工作区文件、命令输出落盘文件、工具调用参数或持久 Session 原记录。若一次批次内仅部分结果符合条件，只替换符合条件的那些结果。[候选规则](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) · [回写边界](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts)
 
-**阅读方向：M0 → M6；任一“跳过”都回到总流程 03。**
+**阅读方向：自上而下 M0 → M8；所有“跳过”都回到总流程 03。图内直接给判定式、扫描顺序和修改动作；图后解释表示层与恢复边界。**
 
 ```mermaid
 flowchart TD
-    M0{"M0 总 compact 未禁用？"} -- 否 --> MS["跳过；原历史不变"]
-    M0 -- 是 --> M1["M1 求阈值；投影 entries；本地估算"]
-    M1 --> M2{"M2 micro 显式开启？"}
-    M2 -- 否 --> MS
-    M2 -- 是 --> M3{"M3 距上次 assistant 完成大于 60 分钟，或本地估算达到 M？"}
+    M0{"M0 compact.enabled != false<br/>且 microcompact.enabled == true？"} -- 否 --> MS["跳过；不修改消息；进入 03"]
+    M0 -- 是 --> M1["M1 从模型/配置取 W=contextWindow 默认200000<br/>R=maxOutputTokens 默认32000；B=bufferTokens 默认13000<br/>T=max(0,W-min(R,21000)-B)<br/>M=thresholdTokens 或 max(0,min(floor(0.9*T),T-2000))"]
+    M1 --> M2["M2 将本轮 entries 投影为模型消息<br/>E=逐消息求和 ceil((文本字符数+工具名及入参JSON字符数)/3)"]
+    M2 --> M3{"M3 A: now-lastAssistantCompletedAtMs &gt; 60分钟<br/>或 B: E &gt;= M？"}
     M3 -- 否 --> MS
-    M3 -- 是 --> M4["M4 过滤合格工具结果；按调用批次分组"]
-    M4 --> M4B{"合格组数大于保留数？"}
-    M4B -- 否 --> MS
-    M4B -- 是 --> M5{"M5 旧组暂替换后，实际估算至少省 256 token？"}
-    M5 -- 否 --> MS
-    M5 -- 是 --> M6["M6 提交替换到运行时历史与本轮 entries；发事件"]
+    M3 -- 是 --> M4["M4 从旧到新顺序扫描投影消息<br/>每遇 assistant 的非空 toolCalls 开新组<br/>只收 role=tool 且有 toolCallId/toolName<br/>工具=Read/Bash/Grep/Glob/WebFetch/WebSearch/<br/>Edit/Write/ApplyPatch"]
+    M4 --> M5["M5 排除错误默认、已清过、含 image/video/file 的结果<br/>只数非空合格组；孤立合格结果单独成组"]
+    M5 --> M6{"M6 合格组数 &gt; K？<br/>K=keepRecentToolResults 默认5，最少1"}
+    M6 -- 否 --> MS
+    M6 -- 是 --> M7["M7 保留最新 K 组合格结果<br/>更旧组中每条合格结果：整个 content 暂换成<br/>[Old tool result content cleared]"]
+    M7 --> M8{"M8 E-替换后估算 &gt;= minTokenSavings 默认256？"}
+    M8 -- 否，撤销全部 --> MS
+    M8 -- 是 --> MC["按 toolCallId 回写运行时历史与本轮 entries<br/>发 MicrocompactBoundary；进入 03"]
 ```
 
 | 决策点 | 实际输入与计算 | 容易误解的边界 |
 | --- | --- | --- |
-| M1「投影」 | `buildProviderRequestMessages(entries, applyCacheControl: false)` 把 runtime attachment 包成模型消息，处理其顺序及会话中途 system 的表示，剥离内部 metadata；**尚未调用 Provider**。Microcompact 以这份消息判断“模型会看到什么”，再凭 `toolCallId` 回写对应 runtime entry。 | 不是读取 SQLite/UI 文本，也不是最终 wire payload；工具 schema 和之后的媒体预算不在本次估算中。 |
+| M2「投影」 | `buildProviderRequestMessages(entries, applyCacheControl: false)` 把 runtime attachment 包成模型消息，处理其顺序及会话中途 system 的表示，剥离内部 metadata；**尚未调用 Provider**。Microcompact 以这份消息判断“模型会看到什么”，再凭 `toolCallId` 回写对应 runtime entry。 | 不是读取 SQLite/UI 文本，也不是最终 wire payload；工具 schema 和之后的媒体预算不在本次估算中。 |
 | M1–M3「估算和触发」 | 对每条投影消息：`ceil((内容文本长度 + tool-call 名称及 JSON 入参长度) / 3)`，逐条求和；reasoning 文本计入，image/video 等按文字占位估，**不用 Provider usage**。`T = max(0, W − min(R, 21,000) − B)`；默认 `W=200,000`、`R=模型声明的最大输出或 32,000`、`B=13,000`。`M` 默认 `max(0, min(floor(0.9×T), T−2,000))`，可由 `microcompact.thresholdTokens` 覆盖。 | 时间阈值是距**上次 assistant 完成**严格大于默认 60 分钟；没有完成时间就不能走时间分支。时间条件先判断，同时满足时标记为 time-based。配置可覆盖 idle 分钟数。 |
-| M4–M5「选与算收益」 | 默认候选工具：Read、Bash、Grep、Glob、WebFetch、WebSearch、Edit、Write、ApplyPatch；默认排除错误、已清过、含 image/video/file 的结果。每遇到一次 assistant tool-call 批次建立一组，同批多个合格结果同组；仅统计**合格组**。保留最新默认 5 组（配置可覆盖，但最少 1 组），清更旧组中全部合格结果。用替换前后同一估算器算差额；小于默认 256 token 则撤销整个清理。 | 不是删最早 5 条消息，也不是按字节截一段；单个不合格结果不使同批其他合格结果失去资格。 |
+| M4–M8「选、换、算收益」 | 默认候选工具：Read、Bash、Grep、Glob、WebFetch、WebSearch、Edit、Write、ApplyPatch；默认排除错误、已清过、含 image/video/file 的结果。每遇到一次 assistant tool-call 批次建立一组，同批多个合格结果同组；仅统计**合格组**。保留最新默认 5 组（配置可覆盖，但最少 1 组），清更旧组中全部合格结果。用替换前后同一估算器算差额；小于默认 256 token 则撤销整个清理。 | 不是删最早 5 条消息，也不是按字节截一段；单个不合格结果不使同批其他合格结果失去资格。 |
 
 **实现级伪代码（保持源码判定顺序）：**
 
@@ -106,7 +107,7 @@ flowchart TD
 
 **Prompt Cache 的影响：**Microcompact 判断用的投影指定 `applyCacheControl: false`，它本身既不发模型请求，也不操作 Provider 缓存；若跳过或因收益不足撤销，缓存输入不因它改变。若真正清掉 G1/G2，下一次发给模型的消息在首条被清结果处就与旧请求不同，因此跨过该位置的**完全相同前缀缓存不能原样复用**；在它之前未变的前缀仍可能复用。最终请求会在重新投影后设置新的 ephemeral cache marker，适配器再映射到 Provider；源码不能保证某个 Provider 实际命中多少、缓存何时过期或是否按此粒度计费。因此代价是一次可能的缓存命中下降，收益是旧工具正文更少占用模型上下文；这里没有看到“先比较缓存成本再决定是否 microcompact”的门槛。[Micro 投影](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) · [最终请求及 marker 时机](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) · [marker 位置](../../../apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts) · [Provider 映射](../../../apps/zcode-cli/packages/adapters/src/model/transform.ts)
 
-**M6 只改两份活跃表示：**运行时 canonical `MessageHistory` 与本轮 `request entries`。被选结果的 content 变为 `[Old tool result content cleared]`；tool-call ID、顺序和配对保留。默认 `MicrocompactBoundary` 进入内存 eventStore；原 Session tool part 不回写，UI transcript 不缩短。故同一 Runtime 的后续模型步骤继续看到占位符，但冷恢复从持久 tool part 重建时不会回放这次清理。[runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [turn-tools.ts:286-345](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts) [events.ts:263-280](../../../apps/zcode-cli/packages/core/src/runtime/methods/events.ts)
+**MC 只改两份活跃表示：**运行时 canonical `MessageHistory` 与本轮 `request entries`。被选结果的 content 变为 `[Old tool result content cleared]`；tool-call ID、顺序和配对保留。默认 `MicrocompactBoundary` 进入内存 eventStore；原 Session tool part 不回写，UI transcript 不缩短。故同一 Runtime 的后续模型步骤继续看到占位符，但冷恢复从持久 tool part 重建时不会回放这次清理。[runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [turn-tools.ts:286-345](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts) [events.ts:263-280](../../../apps/zcode-cli/packages/core/src/runtime/methods/events.ts)
 
 | 冷恢复时的来源 | 原工具结果还在吗？ | 会不会直接回到模型？ |
 | --- | --- | --- |
@@ -115,7 +116,14 @@ flowchart TD
 
 若之后的完整 compact 摘要基于已清理的运行时历史生成，Microcompact 还可能**间接影响持久化摘要**，尽管它没有修改原 tool part。[冷恢复](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts) · [tool part hydration](../../../apps/zcode-cli/packages/core/src/agent/session-history-hydrator.ts) · [SQLite store](../../../apps/zcode-cli/packages/adapters/src/storage/session-store.ts) · [诊断 JSONL](../../../apps/zcode-cli/packages/adapters/src/model/runner-debug.ts)
 
-Microcompact 不保证清理后低于 Auto compact 阈值；下一站始终是 03。
+**退出再恢复，会不会把旧全文又塞进模型？** 会有“恢复后重新膨胀”的可能，但恢复动作本身还没有向 Provider 发请求。按实际顺序看：
+
+1. 退出前仅发生 Microcompact、没有后续完整 compact boundary 时，SQLite 保留旧 tool part 原文；`resumeFromStore` 按有效历史重新 hydrate，旧结果回到新的 `MessageHistory`。它也从最近有效 assistant 的持久完成时间恢复 `lastAssistantCompletedAtMs`；并不重放旧的 MicrocompactBoundary。若已经成功完整 compact，冷恢复会先按该 boundary 选摘要和保留段，旧消息虽然仍在库中，却不全回到有效历史。[resume.ts:152-189](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts) [hydrator.ts:54-199](../../../apps/zcode-cli/packages/core/src/agent/session-history-hydrator.ts) [compact-session.ts:4-46](../../../apps/zcode-cli/packages/core/src/agent/compact-session.ts)
+2. 下一条用户输入进入第一个 model step，**先**用重建的完整 entries 再跑 M0–M8，**后**跑 Auto compact。如果 Microcompact 已启用，距上次 assistant 完成超过 60 分钟，或重新投影估算 `E >= M`，它会再次扫描并清理；未启用、两个触发均未满足、合格旧组不够或节省不足 256 时，旧结果保持原样。故不能说“恢复时自动沿用上次 Microcompact 的节省”。[turn-loop.ts:67-103](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) [microcompact.ts:24-115](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts)
+3. Auto compact 接着按 `T` 判断是否另发摘要请求。它优先取**最近已提交 assistant 的 Provider usage 基线 + 后续消息本地估算**，而非无条件重算恢复后全文。特别是上次 Microcompact 清理后又发过模型请求时，该 usage 可反映“已清理的上下文”，冷恢复却重新引入更早 tool part 全文；若旧内容位于 usage 基线之前，Auto 的增量计算不会补回它们，**存在低估、未提前压缩的条件性风险**。这是源码推论，尚未用真实 Provider 验证。[compact.ts:317-350](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) [usage.ts:54-65](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step-usage.ts)
+4. 普通请求前的 output preflight 用同一 `estimateCurrentModelInputTokens` 估算输入，并把输出上限裁到 `min(R, floor(W-estimatedInput-1000))`；若算得非正，反而保留原输出上限，交给后续错误恢复，**不是阻断超窗输入的硬闸门**。若 Provider 报 context-exceeded，或返回相应 finish reason，Reactive compact 在同一 model step 最多尝试一次完整摘要并重试；摘要失败、历史不足、功能关闭或保护条件阻断时，原超窗错误仍可能抛出。因此“退出再进来一定不会撑爆”并无源码保证。[model-token-limits.ts:17-40](../../../apps/zcode-cli/packages/core/src/runtime/methods/model-token-limits.ts) [turn-model-step.ts:239-252](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [turn-model-step.ts:375-439](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts) [turn-model-step.ts:499-524](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts)
+
+这里的“撑爆上下文”是下一次 Provider 输入超窗；冷恢复重建旧消息也有本地内存成本，但源码路径没有据此给出可量化内存上限。Microcompact 不保证清理后低于 Auto compact 阈值；M8 后下一站仍是 03。
 
 ## 03. Auto compact：判定、摘要、替换和冷重建
 

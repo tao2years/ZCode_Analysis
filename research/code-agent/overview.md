@@ -141,6 +141,8 @@ Context 管理是多级策略：Skills metadata 与 Memory index 控制常驻内
 
 Microcompact 清的是运行时历史和本轮请求中的旧工具结果，不回写 Session 的原 tool part；冷恢复重新从持久消息 hydrate，但若已有完整 compact boundary，仍按有效历史选择。跨会话上下文又有独立入口：`#sess_*` 只触发读取提示，需要时由 `ReadSessionContext` 按需从另一 Session 的持久记录提取；这与 Project Memory 的跨会话事实索引是两种机制。`model-io` JSONL 是有界诊断投影，不是 Session 恢复源。[E28、E29]
 
+由此有一条需要保留的系统边界：若退出前只有 Microcompact、没有完整 compact boundary，冷恢复会带回持久的旧工具全文；下一次模型步虽然重新检查 Microcompact/Auto，Auto 的最近 Provider usage 可能代表清理后的较小输入而低估恢复后的历史。输出预算 preflight 并非输入超窗硬闸门；Provider 报错后的 Reactive compact 也可失败。此为源码条件性推论，未作实际 Provider 超窗验证。[E35]
+
 ## Desktop 与手机：同一执行事实，不同交付形态
 
 `desktop-continuous` 和 `web-remote-replayable` 的差别不只是传输媒介。profile 定义不同 flush 窗口、可流式字段、工具输出增量上限和 toolProgress 行为；它们由可信连接模式决定。replayable 的工具 output 流增量上限为 0，不等于没有最终工具结果。[E13]
