@@ -300,3 +300,12 @@
 - `apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts:45-99,299-334`、`apps/zcode-cli/packages/adapters/src/model/transform.ts:499-513`：最终请求重投影后设置 ephemeral cache marker，再映射到 Provider 选项。
 
 支持：[B5](../topics/b-context-management.md) 的连续两步例子和缓存影响。缓存失配从首个被替换结果开始是请求内容对比的静态推论；具体 Provider 命中率和计费需运行数据，当前未实测。
+
+## E32：Microcompact 的实现级裁剪算法
+
+- `apps/zcode-cli/packages/core/src/compact/microcompact.ts:8-40,77-168,171-256`：默认阈值参数、触发优先级、候选工具白名单、结果筛选、按 assistant tool-call 消息划组、保留最近合格组、整条 content 替换为 33 字符常量，以及节省不足时全部回滚。没有单条结果的 preview、头尾保留或中段裁剪。
+- `apps/zcode-cli/packages/core/src/compact/manual.ts:102-140`、`packages/shared/src/usage-stats.ts:9`、`apps/zcode-cli/packages/contracts/src/model/index.ts:420-445`：每条消息按内容文本与 tool-call 入参长度除以 3 估算；reasoning 和媒体内容的文字表示有独立规则。
+- `apps/zcode-cli/packages/core/src/compact/policy.ts:6-99`、`runtime/methods/microcompact.ts:24-115`：Auto 阈值参数如何派生 Micro 阈值、配置覆盖、成功时写入哪两份运行时状态。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:90-150`：按 toolCallId 将投影上已清结果回写 runtime tool entry；其他消息、工具调用参数不改。
+
+支持：[B5](../topics/b-context-management.md) 的实现级伪代码与 900 字符结果的可复算例子。例子是基于源码规则构造的假设数据，未运行目标 Agent 或 Provider。

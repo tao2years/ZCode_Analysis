@@ -51,27 +51,58 @@ Context 初始化从 `ContextSourcePort` 得到指令/环境快照，并加载 S
 
 ## 02. Microcompact：只清旧工具结果，不生成摘要
 
-**阅读方向：M1 → M6；任一“跳过”都回到总流程 03。**
+**可复现的核心规则：不截取单条结果的前/后片段，也不按 Token 预算裁中间。选中一条 tool result，就把它的整个 `content` 替换为 33 字符的 `[Old tool result content cleared]`；未选中的结果保持原样。Token 数只控制是否尝试以及总替换是否值得提交。**
+
+这 9 个工具共享**同一条结果级规则**，没有 `Read` 留文件头、`Bash` 留日志尾之类的专用算法。被替换的是模型对话中那条旧结果的 content，不是被读文件、工作区文件、命令输出落盘文件、工具调用参数或持久 Session 原记录。若一次批次内仅部分结果符合条件，只替换符合条件的那些结果。[候选规则](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) · [回写边界](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts)
+
+**阅读方向：M0 → M6；任一“跳过”都回到总流程 03。**
 
 ```mermaid
 flowchart TD
-    M1["M1 取本轮 request entries；投影成模型消息"] --> M2{"M2 总 compact 未禁用且 micro 显式开启？"}
-    M2 -- 否 --> MS["跳过；原历史不变"]
+    M0{"M0 总 compact 未禁用？"} -- 否 --> MS["跳过；原历史不变"]
+    M0 -- 是 --> M1["M1 求阈值；投影 entries；本地估算"]
+    M1 --> M2{"M2 micro 显式开启？"}
+    M2 -- 否 --> MS
     M2 -- 是 --> M3{"M3 距上次 assistant 完成大于 60 分钟，或本地估算达到 M？"}
     M3 -- 否 --> MS
     M3 -- 是 --> M4["M4 过滤合格工具结果；按调用批次分组"]
-    M4 --> M5{"M5 组数大于保留数，且预计至少省 256 token？"}
+    M4 --> M4B{"合格组数大于保留数？"}
+    M4B -- 否 --> MS
+    M4B -- 是 --> M5{"M5 旧组暂替换后，实际估算至少省 256 token？"}
     M5 -- 否 --> MS
-    M5 -- 是 --> M6["M6 清旧组；替换运行时历史与本轮 entries；发事件"]
+    M5 -- 是 --> M6["M6 提交替换到运行时历史与本轮 entries；发事件"]
 ```
 
 | 决策点 | 实际输入与计算 | 容易误解的边界 |
 | --- | --- | --- |
 | M1「投影」 | `buildProviderRequestMessages(entries, applyCacheControl: false)` 把 runtime attachment 包成模型消息，处理其顺序及会话中途 system 的表示，剥离内部 metadata；**尚未调用 Provider**。Microcompact 以这份消息判断“模型会看到什么”，再凭 `toolCallId` 回写对应 runtime entry。 | 不是读取 SQLite/UI 文本，也不是最终 wire payload；工具 schema 和之后的媒体预算不在本次估算中。 |
-| M3「估算」 | 对每条投影消息：`ceil((内容文本长度 + tool-call 名称及 JSON 入参长度) / 3)`，逐条求和；reasoning 文本计入，image/video 等按文字占位估，**不用 Provider usage**。`T = max(0, W − min(R, 21,000) − B)`；默认 `W=200,000`、`R=模型声明的最大输出或 32,000`、`B=13,000`。`M` 默认 `max(0, min(floor(0.9×T), T−2,000))`，可由 `microcompact.thresholdTokens` 覆盖。 | 时间阈值是距**上次 assistant 完成**严格大于默认 60 分钟；没有完成时间就不能走时间分支。时间条件先判断，同时满足时标记为 time-based。配置可覆盖 idle 分钟数。 |
+| M1–M3「估算和触发」 | 对每条投影消息：`ceil((内容文本长度 + tool-call 名称及 JSON 入参长度) / 3)`，逐条求和；reasoning 文本计入，image/video 等按文字占位估，**不用 Provider usage**。`T = max(0, W − min(R, 21,000) − B)`；默认 `W=200,000`、`R=模型声明的最大输出或 32,000`、`B=13,000`。`M` 默认 `max(0, min(floor(0.9×T), T−2,000))`，可由 `microcompact.thresholdTokens` 覆盖。 | 时间阈值是距**上次 assistant 完成**严格大于默认 60 分钟；没有完成时间就不能走时间分支。时间条件先判断，同时满足时标记为 time-based。配置可覆盖 idle 分钟数。 |
 | M4–M5「选与算收益」 | 默认候选工具：Read、Bash、Grep、Glob、WebFetch、WebSearch、Edit、Write、ApplyPatch；默认排除错误、已清过、含 image/video/file 的结果。每遇到一次 assistant tool-call 批次建立一组，同批多个合格结果同组；仅统计**合格组**。保留最新默认 5 组（配置可覆盖，但最少 1 组），清更旧组中全部合格结果。用替换前后同一估算器算差额；小于默认 256 token 则撤销整个清理。 | 不是删最早 5 条消息，也不是按字节截一段；单个不合格结果不使同批其他合格结果失去资格。 |
 
-**按一次 model step 走完（假设数据，非运行记录）：**模型窗口 200K、输出上限 32K，得 Auto 阈值 `T=166K`、Micro 阈值 `M=149.4K`。这次从内存 entries 投影出的消息估算为 120K，本来没有 Token 压力；但距上次 assistant 完成已过 61 分钟，所以进入候选扫描。历史中有合格工具调用批次 G1…G7：G1 的同一次 assistant 调用了 Read 与 Bash，各有一条文本结果；G2 有一条 Grep 文本结果。系统按**合格批次**保留最新 G3…G7，暂把 G1 两条和 G2 一条结果的 content 换成固定标记，其他消息、工具调用、入参和结果 ID 不动。再对替换后的消息**重新估算一次**，计算 `节省 = 原估算 − 新估算`：若只省 200 token（小于 256），全部撤销；若省 900 token，则把替换写入运行时历史和本轮请求 entries。下一次 model step 仍会检查，但已清过的 G1/G2 不再是候选；若此时新添一个 G8 且仍满足触发条件，合格组变为 G3…G8，才轮到 G3 被清理。可见“每步检查”不等于“每步裁剪”。[投影](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) · [估算器](../../../apps/zcode-cli/packages/core/src/compact/manual.ts) · [候选、收益和已清标记](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) · [阈值构造](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) · [每步调用位置](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts)
+**实现级伪代码（保持源码判定顺序）：**
+
+```text
+每次 model step 前：
+  若 compact.enabled=false：退出
+  messages = project(runtimeEntries, applyCacheControl=false)
+  before = sum_per_message(ceil((contentTextChars + toolCallNameAndJsonChars)/3))
+  T = max(0, (W - min(R, 21000)) - B)
+  M = 配置的 thresholdTokens，否则 max(0, min(floor(T*0.9), T-2000))
+  若 micro 未显式开启：退出
+  若 now-lastAssistantCompletedAt <= idleMinutes*60000 且 before < M：退出
+  顺序扫描 messages：每遇 assistant(toolCalls 非空) 开新批次；
+    收集后续 role=tool、工具名在白名单、带 toolCallId、非错误、
+    未带清理标记、content 无 image/video/file 的结果；空批次不计数
+  groups = 所有非空合格批次（孤立的合格 tool result 各自成组）
+  k = max(1, 配置的 keepRecentToolResults，否则 5)
+  若 groups.length <= k：退出
+  对 groups[0 : groups.length-k] 内每条合格结果：整个 content 换为固定标记
+  after = 用同一估算器对替换后 messages 求和
+  若 max(0,before-after) < 配置的 minTokenSavings（否则 256）：撤销并退出
+  按 toolCallId 把替换写入 runtime MessageHistory 与本轮 request entries；发边界事件
+```
+
+**可复算例子（假设输入，非运行记录）：**`W=200,000`、`R=32,000`、`B=13,000`，故 `T=166,000`、`M=149,400`。投影总估算 `120,000`，但距上次 assistant 完成已过 61 分钟，因时间条件仍进入扫描。合格批次 G1…G7 中，G1 有 Read、Bash 两条结果，G2 有 Grep 一条；它们各为 900 字符纯文本，其余消息合计估算 `119,100`。保留 G3…G7，清 G1/G2 三条：每条从 `ceil(900/3)=300` 变为 `ceil(33/3)=11` token，合计节省 `3×(300−11)=867`，结果估算 `119,133`；`867≥256`，提交。若三条合计只省 200 token，则整次撤销，没有“先清一点”的退让。下一步已清的 G1/G2 不再入候选；若出现 G8 且仍触发，剩余合格组 G3…G8 中才轮到 G3。[投影](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) · [估算器](../../../apps/zcode-cli/packages/core/src/compact/manual.ts) · [候选与替换](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) · [阈值构造](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts)
 
 **Prompt Cache 的影响：**Microcompact 判断用的投影指定 `applyCacheControl: false`，它本身既不发模型请求，也不操作 Provider 缓存；若跳过或因收益不足撤销，缓存输入不因它改变。若真正清掉 G1/G2，下一次发给模型的消息在首条被清结果处就与旧请求不同，因此跨过该位置的**完全相同前缀缓存不能原样复用**；在它之前未变的前缀仍可能复用。最终请求会在重新投影后设置新的 ephemeral cache marker，适配器再映射到 Provider；源码不能保证某个 Provider 实际命中多少、缓存何时过期或是否按此粒度计费。因此代价是一次可能的缓存命中下降，收益是旧工具正文更少占用模型上下文；这里没有看到“先比较缓存成本再决定是否 microcompact”的门槛。[Micro 投影](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) · [最终请求及 marker 时机](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) · [marker 位置](../../../apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts) · [Provider 映射](../../../apps/zcode-cli/packages/adapters/src/model/transform.ts)
 
