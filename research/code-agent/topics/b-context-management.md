@@ -17,6 +17,22 @@
 
 Session 的**冷恢复**是新输入前可能发生的另一条入口：协议层重新激活 session record，Core 的 [`resumeFromStore`](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts)（59 行）从持久记录重建有效历史。它不替代上面的单轮执行器。若只想抓核心控制流，先读第 **6 → 7 → 8** 步，再向上补第 **1 → 5** 步。
 
+## 能力是否真正接入：静态核查清单
+
+“源码里有”不等于“这个产品入口默认运行”。下表区分 Builder/Runtime 实现、产品配置与已确认的调用；没有实际启动目标 Agent，不能据此宣称某台设备的实时设置。
+
+| 能力 | 当前源码可确认的接入状态 | 对阅读主流程的影响 |
+| --- | --- | --- |
+| 默认身份中的 `# Harness`、Context management、Memory 使用说明 | 默认交互身份注入 Harness；Memory 说明还要求有效 memory root。`customSystemPrompt` 会替换默认身份并跳过动态 system 段；工作流子代理另有身份契约但复用 Harness。 | 不能把提示词当运行时强制逻辑，也不能说它们每轮无条件存在。[Builder](../../../apps/zcode-cli/packages/core/src/context/builder.ts) · [Harness](../../../apps/zcode-cli/packages/core/src/context/sections/identity.ts) |
+| Project Memory | CLI 基础配置 `features.memory=true`、`memory.use=true`；桌面/Web 的产品 `memoryEnabled` 设置默认 `false`，Session 创建/恢复时关闭值会覆盖 CLI 默认。真正加载仍需有效存储根、合格 task type；后台提取还要求本地 workspace、store/file port 和未关闭 extraction。 | 同一仓库有实现，不代表当前桌面会话已启用；即便启用，也只自动加载索引，正文按需读。[CLI 默认](../../../apps/zcode-cli/packages/contracts/src/config/index.ts) · [产品默认](../../../packages/shared/src/validationAppSettings.ts) · [覆盖](../../../apps/zcode-cli/packages/bootstrap/src/zcode-protocol/server-operations.ts) · [运行条件](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory.ts) |
+| Microcompact | 每次 model step 都调用检查函数，但它要求 `compact.microcompact.enabled === true`；当前已追的常规 runtime 配置组装未设置此字段，故**默认不执行清理**，可由显式内部 runtime 配置开启。 | 不能把上文 02 的裁剪算法写成默认实际发生。[循环调用](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) · [启用门](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) · [配置组装](../../../apps/zcode-cli/packages/bootstrap/src/app/runtime-config.ts) |
+| Auto / Reactive compact | 完整 compact 在 CLI 基础配置默认允许；Runtime 循环有 auto 判断，Provider 超窗有 reactive 分支，均受 `compact.enabled` 和各自前置条件约束。 | 与默认关闭的 microcompact 不同；“允许”仍不代表某次输入一定压缩。[默认](../../../apps/zcode-cli/packages/contracts/src/config/index.ts) · [自动入口](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts) · [Reactive](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts) |
+| `SessionMemory` compact trigger | 契约枚举与 phase/reason 映射存在；在已检索的 CLI、Core、共享及 UI 调用路径中，未找到把它传给压缩执行器的生产调用点。 | 标为**未确认接入**，不能推断有独立 Session-memory 自动压缩。[枚举](../../../apps/zcode-cli/packages/contracts/src/compact/index.ts) · [映射](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) |
+| `legacy` 上下文预算策略 | 协议仍接受 `legacy`，但 Runtime 构造时归一为共享默认 `preflight-v1`；输出上限计算的 legacy 参数只保留兼容。 | 不应把两个字符串描述为当前可切换的两套算法。[协议](../../../packages/shared/src/zcode-protocol/index.ts) · [Runtime 归一](../../../apps/zcode-cli/packages/core/src/runtime/agent-runtime.ts) · [预算](../../../apps/zcode-cli/packages/core/src/runtime/methods/model-token-limits.ts) |
+| 提示词/兼容接口中尚未接入的分支 | `ContextBuilder.setToolRegistry()` 目前是 no-op；Agent/AskUserQuestion 的 Session guidance 文本在源码中被注释；`buildCompactSummaryMessage` 可接受 transcript 路径、最近消息保留、REPL 清空标记，但当前 compact 调用只传 `suppressFollowup`。 | 这些只能列为兼容/预留形态，不能写成当前模型必见的提示。[Builder](../../../apps/zcode-cli/packages/core/src/context/builder.ts) · [Guidance](../../../apps/zcode-cli/packages/core/src/context/dynamic-sections.ts) · [摘要构造与调用](../../../apps/zcode-cli/packages/core/src/compact/prompt.ts) |
+
+这份清单只核查本批上下文主链与产品配置，不代表全仓所有灰度功能已审完。对其他能力仍按“声明 → 配置默认与覆盖 → 运行时门 → 生产调用点 → Provider 实际输入”追踪，缺任一环就保留状态边界。
+
 ## 一条消息经过上下文系统的路径
 
 **阅读方向：从上往下，按 00 → 08。** `02` 到 `08` 是一个 **model step**；工具结果、输出续写或 Reactive compact 成功会回到 `02`，同一用户输入可能经过多次。手动 `/compact` 是独立命令入口，使用后文的完整摘要链路，不经过本图的自动阈值判断。基线：`872ad960de7ec172591f7e1952f7849229f94521`。

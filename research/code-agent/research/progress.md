@@ -104,3 +104,10 @@
 - [Skill 试用记录](skill-trial.md) 已把正确性分支与系统结论从“通过”改为待复核。Skill 草案此前用于静态研究清单，`quick_validate.py` 只证明结构合规；不能再称“深度使用且已通过研究质量验收”。index 中 B5/B2 状态同步下调，Skill 验收加“从入口图可发现机制”门槛。
 - 尚需用户复核新版主图与 Reactive 细节。未运行真实 Provider 超窗实验；源码可证明控制流，不能声称所有 Provider 错误都被准确分类或恢复一定成功。
 - 本轮验证：12 张研究 Mermaid 图在本机 Chrome 中完成解析和 SVG 渲染；Skill `quick_validate.py`、变更 Markdown 本地链接、`git diff --check`、`corepack pnpm typecheck` 通过；`corepack pnpm lint` 为 0 error、70 条已有 warning。这些仅证明文档结构和仓库静态检查，不证明用户已接受研究深度。
+
+## Context 能力启用状态与 Harness 补漏（2026-09-22）
+
+- 用户指出报告没把 Memory、Harness 等提示及“写了但未开启”的上下文能力讲清。B1 已补默认 `# Harness` 和 Memory system 提示的实际语义及 custom system prompt 覆盖边界；B5 新增“声明 → 产品默认/覆盖 → 运行时门 → 生产调用点”的启用状态表。Skill 问题库同步要求查 Prompt section 清单和启用链。
+- 关键纠偏：桌面/Web 的 `memoryEnabled` 产品设置默认 `false`，CLI 基础配置 `features.memory=true` 不能反推产品已启用；microcompact 函数每步调用，但 `enabled` 需要显式 `true`，已查常规配置未设置；`SessionMemory` compact trigger 暂只见枚举/映射；`legacy` 预算字符串被 Runtime 归一为 `preflight-v1`。这些是当前静态源码路径的结论，不代表所有外部调用方或用户实时配置。
+- 仍未做全仓所有功能灰度盘点，也未启动目标 Agent/Provider。后续用户追问某项时沿生产调用链校验，再更新表格和受影响专题；不要以关键字搜索缺席证明绝不存在。
+- 验证：修改文档的本地链接、Skill 结构校验和 `git diff --check` 通过；本地 `tsc -b` 通过，`oxlint` 为 0 error、70 条既有 warning。上述检查不构成目标 Agent 的运行验证。

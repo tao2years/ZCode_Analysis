@@ -21,6 +21,10 @@ runtime 首次需要上下文时加载项目 Memory root 与 `MEMORY.md` index�
 
 Builder 的主要顺序是：CLI/product prefix；自定义或默认身份；动态行为、session guidance、Memory 使用说明、环境、输出风格和 context management；Skills listing；最后是项目/用户指令、Memory index 与日期。工具说明不再复制进 system prompt，真实工具契约通过 model request 的 `tools` 字段发送。[builder.ts:39-220](../../../apps/zcode-cli/packages/core/src/context/builder.ts)
 
+**此前遗漏的 Harness 是身份提示的一部分。**默认交互身份的 `# Harness` 明确告诉模型：普通文字会作为 Markdown 展示；工具受用户选择的权限模式约束，拒绝后应调整而非原样重试；运行中可能收到 system 管理的规则/提醒，Hook 可拦截工具且其输出应视作用户反馈；优先使用专用文件/搜索工具，独立工具调用可并行；源码引用用 `file_path:line_number`。这是**提示给模型的运行环境契约**，不是 `Harness` 类统一执行这些行为。动态工作流子代理身份复用同一块，但另有“结果交给脚本而非直接对用户说话”的契约。若配置 `customSystemPrompt`，Builder 用自定义正文替换默认身份，也跳过动态 system 段；因此不能断言每个模型请求都含 `# Harness`。[身份与 Harness](../../../apps/zcode-cli/packages/core/src/context/sections/identity.ts) · [工作流身份](../../../apps/zcode-cli/packages/core/src/context/sections/workflow-actor.ts) · [Builder 分支](../../../apps/zcode-cli/packages/core/src/context/builder.ts)
+
+**Memory 提示也要拆成两层。**`# Memory` system 段告诉模型事实文件格式、类型、链接、写后更新 `MEMORY.md`、写前查重和冲突修正；它只在 `memoryRoot` 存在且没有被自定义 system prompt 跳过时加入。`MEMORY.md` 索引作为 meta-user request context 另行注入；具体事实正文不因这段提示自动进入模型。去重与语义冲突是提示词要求，不能冒充硬性事务保证。[Memory 提示](../../../apps/zcode-cli/packages/core/src/context/sections/memory.ts) · [索引入口](../../../apps/zcode-cli/packages/core/src/context/sections/request-user-context.ts) · [Builder 条件](../../../apps/zcode-cli/packages/core/src/context/builder.ts)
+
 组装后，stable/dynamic system sections 成为 system messages；Skills 和其他请求上下文成为带 source 的 meta-user attachments。[builder.ts:231-306](../../../apps/zcode-cli/packages/core/src/context/builder.ts) `buildContextHistoryEntries` 再把两者转换为 runtime entries。[context-history-entries.ts](../../../apps/zcode-cli/packages/core/src/runtime/methods/context-history-entries.ts)
 
 因此“上下文”不等于单一 system string：部分指令在 system role，部分以经过标记的 user-role system reminder 进入请求，工具 schema 则独立存在。
