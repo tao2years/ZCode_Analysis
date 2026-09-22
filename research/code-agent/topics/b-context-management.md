@@ -1,5 +1,22 @@
 # B5：上下文管理的完整模型
 
+## 从用户输入读到完整 Runtime 循环：源码入口
+
+这条主线**能在源码里连续追踪，但不是由一个 `SessionManager` 函数包办**。按下面顺序阅读；前五处负责「这一条输入怎样开始」，最后两处负责「一个 turn 怎样反复请求模型、执行工具并结束」。这里以桌面/Web 使用的 V4 `sendText` 为入口；CLI/TUI 等其他入口会在 `app.sendInput` 或 Core Runtime 汇合，不能把 V4 协议入口当成所有输入的唯一入口。
+
+| 顺序 | 源码入口 | 它实际负责什么 |
+| --- | --- | --- |
+| 1 | [V4 `sendText`](../../../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/commands/handlers/session-flow.ts)（184 行） | 校验正文/附件，处理 held queue 与立即发送，再调用 `startPromptTurn`。 |
+| 2 | [`startPromptTurn`](../../../apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/commands/prompt-turn.ts)（57 行） | 检查恢复告警与模型、设定本轮限制，调用 `record.app.sendInput`；接纳回执先返回，后台等待本轮 completion 并清理归因。 |
+| 3 | [App `sendInput`](../../../apps/zcode-cli/packages/bootstrap/src/app/input-facade.ts)（193 行） | 准备输入与附件，再交给 `runtime.admitPrompt`。 |
+| 4 | [Core `admitPrompt`](../../../apps/zcode-cli/packages/core/src/runtime/methods/prompt-admission.ts)（20 行） | 在同一 Runtime 判断忙碌、转为 steer/queue 或为新 turn 建 reservation 并入命令队列。排队的输入此时**尚未执行**下面的 turn 主链。 |
+| 5 | [`runRuntimeCommand`](../../../apps/zcode-cli/packages/core/src/runtime/methods/runtime-command-queue.ts)（187 行） | FIFO 消费 prompt 命令，调用 `executeTurnCommand`。 |
+| 6 | [`executeTurnCommand`](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn.ts)（93 行） | **单轮总控**：冻结模型选择、初始化 Context、运行 hooks、记录输入到运行时历史与持久 Session、建立本轮状态，调用 `runRegularTurnLoop`，最后结算并发出终态。手动 `/compact` 和 rewind 在这里走专门分支。 |
+| 7 | [`runRegularTurnLoop`](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts)（43 行） | **每个 model step 的循环总控**：drain 待处理输入 → microcompact → auto compact → 准备工具/提醒 → 投影 Provider 消息 → `runModelBackedTurnStep`；该步骤要求继续时再次循环。 |
+| 8 | [`runModelBackedTurnStep`](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-model-step.ts)（88 行）、[`executeToolCallsForModelStep`](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts)（43 行） | 发起/消费模型响应、处理上下文超窗的 reactive compact、输出续写与工具调用；工具结果入本轮历史后由第 7 步开始下一次 model step。 |
+
+Session 的**冷恢复**是新输入前可能发生的另一条入口：协议层重新激活 session record，Core 的 [`resumeFromStore`](../../../apps/zcode-cli/packages/core/src/runtime/methods/resume.ts)（59 行）从持久记录重建有效历史。它不替代上面的单轮执行器。若只想抓核心控制流，先读第 **6 → 7 → 8** 步，再向上补第 **1 → 5** 步。
+
 ## 一条消息经过上下文系统的路径
 
 **阅读方向：从上往下，按 00 → 08。** `02` 到 `08` 是一个 **model step**；工具结果、输出续写或 Reactive compact 成功会回到 `02`，同一用户输入可能经过多次。手动 `/compact` 是独立命令入口，使用后文的完整摘要链路，不经过本图的自动阈值判断。基线：`872ad960de7ec172591f7e1952f7849229f94521`。
