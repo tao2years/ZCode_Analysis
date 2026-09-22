@@ -31,6 +31,8 @@ flowchart LR
 
 串行项会先 flush 当前并行组，再作为单项组执行。executor 逐组推进，组内用 `Promise.all`，并按 max concurrency 切批。[batch-runner.ts:24-76](../../../apps/zcode-cli/packages/core/src/tool/executor/batch-runner.ts)
 
+**最小可复现调度：**输入顺序为 `A=Read`、`B=Grep`、`C=Edit(dependsOn=A)`，且 A/B 的元数据允许并发、C 不允许。调度器先按依赖做拓扑排序并求 `level = 1 + max(依赖 level)`；A/B 在 level 0，C 在 level 1。每层顺序扫描，安全项装入最多 10 个的组，不安全项先 flush 再单独成组，因此得到 `[[A,B],[C]]`。执行先 `Promise.all(A,B)`，整组完成才运行 C；即使 B 比 A 先结束，`Promise.all` 返回数组按输入 A/B 排列。B 的普通失败不会让 C 被自动跳过，只有某结果显式 `stopTurnAfterResult` 才使未开始的后续组生成取消结果。依赖、并发资格和停止语义是三个独立判断。[调度器](../../../apps/zcode-cli/packages/core/src/tool/scheduler.ts) · [批次执行](../../../apps/zcode-cli/packages/core/src/tool/executor/batch-runner.ts)
+
 ## 2. 模型流期间的提前执行
 
 streaming coordinator 只提前执行满足全部条件的工具：已注册、read-only、concurrent-safe、非 destructive、不需审批、不需用户交互且 side-effect scope 为 none。Provider 已执行的调用和名称不完整的调用也被排除。[streaming-tool-coordinator.ts:339-361](../../../apps/zcode-cli/packages/core/src/runtime/methods/streaming-tool-coordinator.ts)
@@ -58,6 +60,8 @@ streaming coordinator 只提前执行满足全部条件的工具：已注册、r
 turn 先持久化 pending tool parts，再执行尚未被 streaming coordinator 完成的调用。流式结果和普通结果进入同一个 `resultById`，随后按原 `coreToolCalls` 顺序生成 `results`。[turn-tools.ts:149-240](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts)
 
 每个结果有两种面向不同消费者的表示：UI/tool part 保存状态和可展示错误；runtime history 保存 `modelContentForToolResult(result)`，供下一 Provider 请求使用。若 `modelContent` 是 string，还会写进持久 metadata，使冷恢复可以精确重放，而不是把 UI 错误文案误当成模型输入。[turn-tools.ts:260-363](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts)
+
+**汇合算法与缺口边界：**流式已执行结果和流结束后待执行结果按 `toolCallId` 放进同一 map；再按模型原始 `coreToolCalls` 列表逐个取回，缺失 ID 会被过滤。随后按这个顺序依次完成状态机中的 tool、持久化 tool part，并将用于模型的内容追加到 request entries。这里能直接证明**已取回结果的顺序**；“所有 tool use 必有结果”还依赖取消与 executor 闭合路径，不能只凭 map/filter 这一行声称绝无缺口。[turn-tools.ts:149-240](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts) [turn-tools.ts:260-363](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts)
 
 系统在每个结果闭合后才检查取消，并延迟抛出，从而允许同批 sibling 结果全部提交；随后写 recovery anchor 和 ledger。工具也可以携带 follow-up user input，进入后续 steering。[turn-tools.ts:368-408](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-tools.ts)
 

@@ -17,7 +17,7 @@ flowchart TD
     E --> G[构造独立 summary 请求]
     E2 --> G
     G --> H{summary 请求过长/媒体过大?}
-    H -->|是| I[多保留最近轮或移除媒体/旧轮后重试]
+    H -->|是| I[媒体过大则移除媒体；超窗则多保留最近轮]
     I --> G
     H -->|否| J[持久 summary + CompactBoundary]
     J --> K[替换 runtime history]
@@ -36,7 +36,9 @@ rapid-refill breaker 还会阻止压缩后很快再次填满的循环，避免�
 
 选取先把 Context prefix 与对话 body 分开，再按 assistant-started rounds 分组。auto/reactive 默认至少保留最近一组，且至少留一组可供摘要；manual 不强制保留最近组。[compact-selection.ts:30-57](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [compact-selection.ts:211-228](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts)
 
-若初次 Provider overflow 提供类似 `actual tokens > limit` 的差值，选择器估算最近各组 token，并扩大保留区以从 summary 请求中移走足够 token。summary 自身仍过长时，auto/reactive 继续增加保留组；manual 等入口可启用降级路径，按 token gap 或约 20% 从最旧组开始丢弃，并在开头需要时加入 retry marker，避免以孤立 assistant 开始。[compact-selection.ts:59-139](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [compact-selection.ts:167-205](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [compact-selection.ts:279-407](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts)
+**实现时要固定分组边界：**正文每出现一条新的 assistant 消息就开始新组；其后的 tool result 和 user 消息归入该组，直到下一条 assistant。最前面的 user 消息可能自成一组。例如 `U1,A1,T1,U2,A2,T2,U3,A3` 被切成 `[U1] [A1,T1,U2] [A2,T2,U3] [A3]`。Auto/Reactive 初始摘要前三组、原样保留末组；Context prefix 也进入摘要请求作背景，但不计为被摘要正文。这不是固定的“一问一答”分组。[rounds.ts](../../../apps/zcode-cli/packages/core/src/compact/rounds.ts) [compact-selection.ts:30-57](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts)
+
+若初次 Provider overflow 给出 `actual tokens > limit` 差值，且正文超过三组，选择器从最近组向前累计**本地估算**，扩大保留区，从而缩小摘要请求。summary 自己超窗时也继续把最近待摘要组移到原文保留区；没有可用差值时至少再移动一组，且始终留一组可摘要。**Auto/Reactive 不丢最旧组作兜底**：摘要输入减小，但压缩后的活动上下文因保留更多原文可能更大。只有 manual 等其他触发类型允许进一步从最旧摘要组丢弃：有 token gap 就累计丢到覆盖 gap，否则约丢最旧 20%（至少一组），最多丢到剩一组；若剩余历史从 assistant 开始，会补 retry marker。这两条策略不能合并为“超窗就裁掉旧消息”。[compact-selection.ts:59-139](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [compact-selection.ts:167-205](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts) [compact-active.ts:267-305](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts) [compact-active.ts:688-695](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact-active.ts)
 
 “保留最近组”不是删除它们：这些 entry 不进入 summary 模型请求，之后会与 summary 一起构成新 runtime history，并通过 `preservedSegment` 记录可供冷恢复重插的持久消息区间。
 
@@ -87,11 +89,7 @@ Reactive 不是普通的“阈值达到就摘要”。Provider **抛出** contex
 
 ## 7. Microcompact：局部清理旧工具结果
 
-microcompact 默认未启用，只有 `compact.microcompact.enabled === true` 才运行。启用后，它在完整 compact 前按时间空闲或 token 压力触发；默认阈值是完整 compact 阈值的 90% 与“提前 2K”两者中的较小值。[microcompact.ts:24-115](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) [microcompact.ts:77-194](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts)
-
-候选仅限配置允许的工具结果，默认保留最近 5 个 assistant tool-call groups，不清错误结果、不清 image/video/file 媒体，并要求至少节省 256 tokens。旧结果内容替换为固定标记 `[Old tool result content cleared]`，tool call 配对和顺序仍保留。[microcompact.ts:12-28](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [microcompact.ts:197-256](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts)
-
-应用后同时替换 canonical runtime history 与当前 request entries，并写 `MicrocompactBoundary` event。[runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts) 目前读到的 cold hydration 从 Session messages 重建，未发现它回放该 event 来永久改写历史工具结果；因此更准确的结论是“microcompact 的内容替换是 runtime 局部优化，事件提供记录，重启后可在下次 loop 再次触发”，而非宣称原 transcript 已被重写。这一点尚未运行验证。
+Microcompact 不生成摘要，也不截取单条工具结果的头尾；满足空闲或 Token 条件后，按白名单过滤、保留最近 5 个**合格工具调用批次**，把更旧合格结果的**整个 content** 替换为固定标记。成功写入 runtime history 和当前 request entries，不回写持久 tool part。触发公式、每条消息的估算方法、候选谓词、整批收益门槛、可复算数字及 Prompt Cache 影响统一见 [B5 的 Microcompact 实现级说明](b-context-management.md)。这里不另存一份可能漂移的简化算法。[microcompact.ts:77-256](../../../apps/zcode-cli/packages/core/src/compact/microcompact.ts) [runtime microcompact.ts:73-102](../../../apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts)
 
 ### 假设示例：压缩后的请求
 

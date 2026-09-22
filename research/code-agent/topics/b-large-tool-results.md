@@ -6,14 +6,28 @@
 
 ## 1. 通用结果预算
 
-工具先通过自己的 formatter 生成完整 `modelContent`，再按 UTF-8 字节计算预算。默认 `maxInlineBytes` 和 `maxModelBytes` 都是 100,000，默认 strategy 为 truncate；实际模型上限取两者较小值。工具还可声明 JS 字符上限。[result-serialization.ts:33-86](../../../apps/zcode-cli/packages/core/src/tool/executor/result-serialization.ts)
+```mermaid
+flowchart TD
+    R1["R1 handler 产出 modelContent；序列化为文本"] --> R2{"R2 空内容？"}
+    R2 -- 是 --> RE["返回 completed-with-no-output 占位"]
+    R2 -- 否 --> R3{"R3 UTF-8 字节及可选字符数超过预算？"}
+    R3 -- 否 --> RF["保留原结构化 modelContent"]
+    R3 -- 是 --> R4{"R4 artifact 策略且启用，写盘成功？"}
+    R4 -- 是 --> RA["完整序列化文本落盘；返回路径和前段 preview"]
+    R4 -- 否 --> RX{"显式字符阈值超限且 artifact 尝试失败？"}
+    RX -- 是 --> RF
+    RX -- 否 --> RT["用剩余字节预算保留 head/tail，再附截断说明"]
+```
 
-在预算内时保留原始结构化 `modelContent`。超限后有两种策略：
+图示是普通文本/常规结构化结果路径；带官方 CUA frame 的结果在 R3 后还有独立保护分支，保留 image/image_ref 原子对，不能套用“全部转字符串截断”。
 
-- `truncate`：按 head/tail 方向裁剪，并加入 originalBytes、maxModelBytes、strategy 和可用 artifact path 的后缀。
-- `artifact`：若启用 artifact 且 store 写入成功，把完整 Provider-visible 序列化内容落盘，模型只看到 `<persisted-output>`、路径和前 2,000 字符 preview。
+| 决策 | 足以复现的规则 |
+| --- | --- |
+| R1–R3 | formatter 先生成 `modelContent`，字符串直接用，结构化内容转为可见文本供字节预算。默认 `maxInlineBytes=maxModelBytes=100,000`、`strategy=truncate`、`direction=head`；有效上限 `max(0,min(maxInlineBytes,maxModelBytes))` UTF-8 bytes。工具另可声明 `maxModelChars`，按 JS 字符长度判断；空内容返回专用占位。预算内保留原 `modelContent`，包括结构化块。 |
+| R4 artifact | 仅当超字节或字符预算、`strategy=artifact`、`artifact.enabled=true` 且 store 写成功，才把**完整的 handler 后序列化文本**写入 artifact。模型看到 `<persisted-output>`、路径和前最多 2,000 个 JS 字符：前 2,000 字符内若最后换行位于后半段，则在该换行处收束；否则硬切 2,000，并加省略号。不是对原始 Bash stdout 的补存。 |
+| RT truncate | 先构造含 `originalBytes`、有效上限、strategy 和可用 path 的后缀；**后缀优先占用预算**，剩余字节才从原文取 `head` 或 `tail`。截取按 Unicode code point 二分找不超过 UTF-8 字节上限的最长片段；默认保留开头，不留中间。没有可用 artifact path 时，仅凭结果无法恢复被省略正文。 |
 
-[result-serialization.ts:161-217](../../../apps/zcode-cli/packages/core/src/tool/executor/result-serialization.ts) [result-persistence-format.ts](../../../apps/zcode-cli/packages/core/src/tool/result-persistence-format.ts)
+**假设输入：**普通工具返回 120,000 个 ASCII `x`，默认预算 100,000 bytes 且无 artifact。先从 100,000 中扣截断后缀实际 UTF-8 字节数，剩余全部填入原文开头；模型收到的是“若干 `x` + 截断后缀”，`returnedBytes≤100,000`，不是恰好前 100,000 个 `x`。若该工具改为 artifact 策略且写盘成功，落盘的是完整 120,000 字符，模型只见前最多 2,000 字符和路径。显式字符阈值超限但 artifact 写入失败时，源码有一条保留原文的兼容分支；因此不能笼统保证所有写盘失败都退回有界截断。[主算法](../../../apps/zcode-cli/packages/core/src/tool/executor/result-serialization.ts) · [字节裁剪](../../../apps/zcode-cli/packages/core/src/tool/executor/result-content-projection.ts) · [预览格式](../../../apps/zcode-cli/packages/core/src/tool/result-persistence-format.ts)
 
 artifact 写入携带 sessionId、turnId、toolCallId、toolName、contentType 和 retention。写入失败不会把成功工具改成失败，而是回退到有界截断；对显式字符阈值的 Provider 文本有一条保留原文的兼容分支。[result-serialization.ts:294-348](../../../apps/zcode-cli/packages/core/src/tool/executor/result-serialization.ts)
 
@@ -29,7 +43,19 @@ serializer 优先把 store 返回的 path 放进模型 preview，其次才是 UR
 
 ## 3. Bash 的流式采集先发生
 
+```mermaid
+flowchart TD
+    B1["B1 进程产生 stdout/stderr"] --> B2{"B2 POSIX merged-output 直写文件？"}
+    B2 -- 是 --> B3["文件保存原始合并流；结束时读前 30000 bytes 供 inline"]
+    B2 -- 否 --> B4["pipe collector：inline head、独立 tail、可选写盘"]
+    B3 --> B5["按 foreground/background 与上限保留、截短或删除文件"]
+    B4 --> B5
+    B5 --> B6["Bash formatter 生成 preview/路径；再进通用 R1–R4"]
+```
+
 这里必须修正此前过度概括：**POSIX Bash merged-output 路径**使用 `BashFileOutput`，子进程直接写到输出文件，Node 读取文件前段形成 inline preview；`OutputCollector` 用于其余 pipe stdout/stderr 路径。后者在进程运行时累积 total bytes、有限 inline head 和独立 tail；`persistOutput=always` 立即落盘，`on_truncate` 在超过 inline limit 时创建文件并补写 head，受单流和 aggregate budget 约束。[node-execution-adapter-run.ts:69-100](../../../apps/zcode-cli/packages/adapters/src/exec/node-execution-adapter-run.ts) [bash-file-output.ts:14-66](../../../apps/zcode-cli/packages/adapters/src/exec/bash-file-output.ts) [output-collector.ts](../../../apps/zcode-cli/packages/adapters/src/exec/output-collector.ts)
+
+**实现级边界：**Bash handler 设 `maxInlineBytes=30,000`、`maxPersistedBytes=5 GiB`；前台 `on_truncate`，后台 `always`。pipe collector 每个 chunk 先决定是否启动落盘，再累计总字节和 tail；inline 只取前 30,000 bytes，写盘流受单路及共享剩余额度限制，额度耗尽标 `artifactTruncated` 并可通知终止。POSIX 直写路径不经过这个 collector 的字节写入逻辑：子进程先写原始文件，结果阶段只读取开头最多 30,000 bytes；foreground 小结果可删文件，大结果按策略保留；若显式 artifact 上限更低，结算可截短保留文件。`truncated` 表示 inline 不是全文，`artifactTruncated` 才描述落盘原文是否被截；二者不能互推。[Bash 参数](../../../apps/zcode-cli/packages/core/src/tool/handlers/bash.ts) · [pipe 算法](../../../apps/zcode-cli/packages/adapters/src/exec/output-collector.ts) · [直写读取](../../../apps/zcode-cli/packages/adapters/src/exec/bash-file-output.ts) · [前台文件结算](../../../apps/zcode-cli/packages/adapters/src/exec/node-execution-adapter-results.ts)
 
 Bash handler 实际给执行适配器的 inline 上限为 30,000 bytes、持久输出上限为 5 GiB；后台模式 `always`，前台 `on_truncate`。[bash.ts:70-71](../../../apps/zcode-cli/packages/core/src/tool/handlers/bash.ts) [bash.ts:420-429](../../../apps/zcode-cli/packages/core/src/tool/handlers/bash.ts) POSIX 文件路径的 `readBashOutput` 返回文件总大小、读取字节数和 `artifactTruncated=false`；但前台结算会按模式决定保留或 best-effort 删除文件，若设置更低的 artifact 上限还可把文件截短并标记 `artifactTruncated=true`。[bash-file-output.ts:153-185](../../../apps/zcode-cli/packages/adapters/src/exec/bash-file-output.ts) [node-execution-adapter-results.ts:94-160](../../../apps/zcode-cli/packages/adapters/src/exec/node-execution-adapter-results.ts)
 

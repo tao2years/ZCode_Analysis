@@ -1,11 +1,12 @@
 # ZCode 源码研究索引
 
-本批目标：通过源码学习 ZCode 的运行思想、技术方案和设计取舍，并按用户确认的顺序完成 A“会话/Agent Loop/工具结果”和 B“消息/上下文/压缩/记忆/大结果”专题。当前已完成 A、B 的既定静态源码深挖；其他模块尚未全仓研究。运行目标应用或真实 Provider 不是本次研究的完成条件。
+本批目标：通过源码学习 ZCode 的运行思想、技术方案和设计取舍，并按用户确认的顺序研究 A“会话/Agent Loop/工具结果”和 B“消息/上下文/压缩/记忆/大结果”专题。A、B 已做静态源码覆盖，现正按用户新确认的“可据此实现同等关键行为”标准回补，修订尚待用户复核；其他模块尚未全仓研究。运行目标应用或真实 Provider 不是本次研究的完成条件。
 
 - 源码基线：`872ad960de7ec172591f7e1952f7849229f94521`，分支 `main`。
 - 研究日期：2026-09-21。
 - 开始时工作区：只有未跟踪的 `skill-drafts/`；没有已跟踪源码改动。本批只新增研究文档和更新 Skill 验证记录。
 - 研究方法：静态源码追踪；本阶段没有运行目标 Agent 或调用模型。
+- 读者深度标准：2026-09-22 按用户反馈提升为“能据报告复现关键行为”；详见[研究读者与深度约定](research/reader-contract.md)。
 - 使用入口：系统研究。按已确认流程，初步全景后确认一次深挖重点。
 
 ## 阅读路径
@@ -14,11 +15,11 @@
 2. A 阶段：[会话、输入准入与 Agent Loop](topics/a-session-admission-agent-loop.md) → [工具调度与结果闭合](topics/a-tool-scheduling-and-results.md)。
 3. B 阶段：[消息与 Provider 输入](topics/b-message-context-and-provider-input.md) → [上下文管理全貌](topics/b-context-management.md) → [上下文压缩](topics/b-compaction.md) → [项目记忆](topics/b-memory.md) → [大工具结果](topics/b-large-tool-results.md)。
 4. [系统收束与工程借鉴](synthesis.md)：专题证据修正后的系统性质、迁移条件与限制。
-5. [证据台账](research/evidence.md)、[进度与未解问题](research/progress.md)、[Skill 试用记录](research/skill-trial.md)。
+5. [读者与深度约定](research/reader-contract.md)、[证据台账](research/evidence.md)、[进度与未解问题](research/progress.md)、[Skill 试用记录](research/skill-trial.md)。
 
 ## 覆盖与状态
 
-下表已阅读项均对应上述基线；未研究项不宣称有有效结论。
+下表已阅读项均对应上述基线；“静态深挖完成”只表示源码覆盖，不代表已通过用户新粒度验收。未研究项不宣称有有效结论。
 
 | 机制                                    | 深度                   | 状态         | 关键缺口                                 | 文档                                                 |
 | --------------------------------------- | ---------------------- | ------------ | ---------------------------------------- | ---------------------------------------------------- |

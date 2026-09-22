@@ -52,6 +52,8 @@ Write/Edit 会在合法 memory Markdown 缺少来源时补 `metadata.node_type: 
 
 Scheduler 串行执行并 coalesce 为最新 pending snapshot。只有成功/no-op 才推进 cursor；错误不推进，因此后续机会仍可覆盖尚未成功提取的区间。关闭 runtime 会 abort 正在执行和待执行任务；普通 close 最多有界等待 60 秒。[extraction.ts:85-180](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [project-memory-extraction.ts:83-110](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
 
+**可复现的队列状态：**S1 正在提取时，S2、S3 先后完成 durable snapshot，scheduler 只保存最新 pending=S3；S1 结束后处理 S3，S2 不单独调用模型。若 S1 返回 success/no-op，cursor 前进到 S1 的 boundary，S3 只判断其后消息；若 S1 抛错或返回失败，cursor 不动，S3 的快照仍可能覆盖 S1 区间。若 S3 里已有主 Agent 的 Write/Edit 指向 memory root，则本次自动提取跳过并推进到 S3 boundary；若没有至少 3 个由空白分隔的词组成的非 synthetic user 文本，也跳过。这个门槛按 `split(/\s+/)` 计词，不是自然语言 tokenizer；中文无空格短句可能达不到三词。上述是源码规则推演，不代表某次模型提取实际发生。[调度与 cursor](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) · [快照构造](../../../apps/zcode-cli/packages/core/src/runtime/helpers/project-memory-extraction.ts)
+
 若区间内已由主 Agent 直接 Write/Edit memory，自动提取跳过，避免重复写；没有至少 3 个词的非 synthetic user prose 也跳过。[extraction.ts:67-83](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts) [extraction.ts:220-303](../../../apps/zcode-cli/packages/core/src/memory/extraction.ts)
 
 ## 5. 受限 Memory Agent

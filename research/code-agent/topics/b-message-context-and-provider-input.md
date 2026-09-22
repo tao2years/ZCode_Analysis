@@ -37,6 +37,8 @@ turn loop 每个步骤先处理待注入 runtime commands，再执行 microcompa
 
 `buildProviderRequestMessages` 先保留每个投影消息的来源映射，再调整 meta attachment 与真实 user/assistant/tool 的因果位置，处理 mid-conversation system，移除 runtime metadata，最后设置 cache marker。当前 provider-neutral 层不合并相邻 user 消息；注释说明相邻 user 合并应由 Anthropic 序列化层承担。[provider-request-messages.ts:27-96](../../../apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts)
 
+**投影的可执行顺序：**(1) 记录原 entry 与投影消息的映射；(2) 从尾向头扫描，把符合条件的 meta attachment 移到最近真实输入/assistant/tool 边界的因果位置，`goal_state_change` 和 history-continuity 来源不走普通移动；(3) 按模型是否支持中途 system 处理相应 entry；(4) attachment 包成带来源对应 wrapper 的 user 消息，**剥离给模型看的消息上的内部 metadata**；(5) 默认不合并相邻 user；(6) 仅实际请求需要时清除旧非 system cache marker，再给最后一条非 system 消息标 `ephemeral`。输出同时有 `messages`、仅供内部对应的 `sourceEntries` 和最新真实 user 的索引；后两者不发给模型。Microcompact/Auto 的判定投影设置 `applyCacheControl=false`，因此只是候选消息，后续提醒与预算仍可能改变最终请求。[投影实现](../../../apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts) · [Microcompact 投影](../../../apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts) · [每步最终重投影](../../../apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts)
+
 attachment entry 必须使用已知 system-reminder source，并在投影时包装为 user role 内容；`goal_state_change` 等会保持原因果位置，普通 meta attachment 可以向真实输入附近移动。[provider-request-messages.ts:98-203](../../../apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts)
 
 `sourceEntries` 不进入模型消息，只用于 token usage 归属和诊断。这使系统可以在不污染 Provider 内容的前提下，将 Provider usage 对应回 runtime entry。
@@ -65,6 +67,8 @@ hydrator 按 active branch 与最后一个 compact boundary 选择消息。工�
 - cache-control 只留在最新合适的非 system message；一次性 continuation 要从持久 ModelRequest 轨迹过滤。
 - Provider media budget 在 provider-clean messages 上应用；UI 可见附件不保证以原形进入模型。
 - Context token 既可能使用本地估算，也可能以最近已提交 assistant 的 Provider usage 为基线加增量，避免每次完全依赖粗略估算。[compact.ts:310-350](../../../apps/zcode-cli/packages/core/src/runtime/methods/compact.ts)
+
+**媒体预算也有确定算法，不是“旧媒体随机裁剪”：**先按模型 input format 做能力投影，再按 data URL 的 UTF-8 字节给当前请求全部 image/video/无 text 的 file 计量，默认总上限 40 MiB。最新**真实** user 消息中的媒体优先保护；它们独自超限就报附件过大，不静默移除。其余历史媒体按消息索引、块索引从新到旧遍历，能完整放进剩余额度才保留，放不下就跳过并把该块换成文字说明；不会切一半 data URL。假设保护媒体 20 MiB，历史最近 10 MiB、再早 25 MiB：40 MiB 内保留 20+10，跳过 25；不是保留 25 的前 10 MiB，也不回头重排已选结果。原 runtime entry、持久附件和 UI 不因本次请求投影被删除。[媒体预算](../../../apps/zcode-cli/packages/core/src/runtime/helpers/media-budget.ts)
 
 ## 设计取舍与迁移条件
 

@@ -70,6 +70,8 @@ sequenceDiagram
 
 对应分支位于 [prompt-admission.ts:26-130](../../../apps/zcode-cli/packages/core/src/runtime/methods/prompt-admission.ts)。这说明 `CommandInbox` 的职责是协议命令的幂等与顺序，runtime admission 的职责是当前执行状态下的产品行为，两层不能合并理解。
 
+**实现级判定顺序：**先算 `busy = hasActiveOrQueuedTurnWork && !promotionLeaseOnly`。Busy 且调用要求 `requireIdle` 或指定了独立 `modelExecution`，立即返回 rejected；否则只有**无 attachments**、active turn 可 steer、delivery 允许 auto/guide/steer 且未强制 queue，才走 `steerTurn`。其余 busy 输入走 deferred queue；要求 guide 但带 attachments 时降成 queue。非 busy 则生成 queryId/turnId、先占 start reservation，再把可取消的 prompt command 放入 runtime queue，回执为 started；这只是准入，不代表执行成功。假设活跃 turn 可 steer：纯文本、`delivery=auto` 会 guide；同样文本加附件不会 guide 而 queue；`requireIdle=true` 则 rejected。三者不能合并为“忙时排队”。[prompt-admission.ts:26-130](../../../apps/zcode-cli/packages/core/src/runtime/methods/prompt-admission.ts)
+
 runtime command queue 还有第三个边界：foreground execution。它持有覆盖整个 runtime command 的 AbortController，stop 可以携带 `expectedForegroundExecutionId` 避免取消已经切换的新执行。`sendQueuedNow` 的内部抢占会设置 `preserveQueueAutoDrainOnCancel`，从而区分用户手动 stop 与为了提升队列项而发生的内部取消。[runtime-command-queue.ts:415-475](../../../apps/zcode-cli/packages/core/src/runtime/methods/runtime-command-queue.ts)
 
 ## 4. 一个 turn 可以包含多个模型步骤

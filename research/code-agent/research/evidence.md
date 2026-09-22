@@ -309,3 +309,21 @@
 - `apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:90-150`：按 toolCallId 将投影上已清结果回写 runtime tool entry；其他消息、工具调用参数不改。
 
 支持：[B5](../topics/b-context-management.md) 的实现级伪代码与 900 字符结果的可复算例子。例子是基于源码规则构造的假设数据，未运行目标 Agent 或 Provider。
+
+## E33：大工具结果的两层可复现预算
+
+- `apps/zcode-cli/packages/core/src/tool/executor/result-serialization.ts:33-217,294-348`：formatter 后按 UTF-8 bytes 与可选 JS 字符阈值判定；默认 100,000 bytes/head/truncate；artifact 成功存完整 handler 后文本，失败通常走有界截断，但显式字符阈值有保留原文的例外。
+- `apps/zcode-cli/packages/core/src/tool/executor/result-content-projection.ts:181-235`、`core/src/tool/result-persistence-format.ts:1-70`：截断后缀优先占预算，余下按 code point 保留最长 head/tail；artifact preview 默认前 2,000 JS 字符、可在后半段换行处收束。
+- `apps/zcode-cli/packages/core/src/tool/handlers/bash.ts:420-429`、`adapters/src/exec/output-collector.ts:43-175`、`adapters/src/exec/bash-file-output.ts:145-185`、`adapters/src/exec/node-execution-adapter-results.ts:94-160`：Bash 30,000 bytes inline 与 5 GiB 持久限额；pipe 和 POSIX 直写采用不同采集路径；`truncated` 与 `artifactTruncated` 指向不同层。
+
+支持：[B4](../topics/b-large-tool-results.md) 的 R1–R4 与 B1–B6 子流程和可复算裁剪。例子为静态推演，未执行目标命令。
+
+## E34：相邻专题的决策顺序与消费者
+
+- `apps/zcode-cli/packages/core/src/compact/rounds.ts:1-33`、`runtime/helpers/compact-selection.ts:30-139,167-205,240-330`、`runtime/methods/compact-active.ts:267-305,688-715`：完整 compact 的 assistant-started 分组、最近组保留、Auto/Reactive 摘要超窗重选，与 manual 等入口的丢最旧组兜底相互区分。支持 [B2](../topics/b-compaction.md)。
+- `apps/zcode-cli/packages/core/src/runtime/helpers/provider-request-messages.ts:45-203,299-334`、`runtime/helpers/media-budget.ts:52-141,188-260`：runtime 到 Provider-neutral 投影顺序、来源映射、cache marker、40 MiB 媒体预算的保护与新近优先算法。支持 [B1](../topics/b-message-context-and-provider-input.md)。
+- `apps/zcode-cli/packages/core/src/tool/scheduler.ts:48-185`、`tool/executor/batch-runner.ts:24-142`、`runtime/methods/turn-tools.ts:149-363`：工具依赖 level、并发安全分组、stop 与普通失败分离、按原调用 ID 顺序汇合。支持 [A2](../topics/a-tool-scheduling-and-results.md)。
+- `apps/zcode-cli/packages/core/src/runtime/methods/prompt-admission.ts:26-130`：busy、guide、queue、reject、started 的条件顺序。支持 [A1](../topics/a-session-admission-agent-loop.md)。
+- `apps/zcode-cli/packages/core/src/memory/extraction.ts:67-180,220-303`：运行中只保留最新 pending snapshot、cursor 推进条件、直接写入跳过与三词用户文本门槛。支持 [B3](../topics/b-memory.md)。
+
+以上例子均标为假设性源码推演，不表示运行目标 Agent、Provider 或命令后的观察。

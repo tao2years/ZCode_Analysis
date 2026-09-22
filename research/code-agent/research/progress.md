@@ -74,3 +74,10 @@
 - 本轮验证：freshness 通过；B5 的 3 个 Mermaid 图在本机 Chrome 中用仓库安装的 Mermaid 解析成功（未做截图级视觉检查）；Skill `quick_validate.py` 通过；本地 Markdown 链接与 `git diff --check` 通过；`corepack pnpm typecheck` 通过；`corepack pnpm lint` 退出 0，仍为 70 条既有 warning、0 error。
 - 用户继续追问“开启后是否每轮都裁剪、哪些工具如何处理、Prompt Cache 是否受影响”。B5 的 02 新增连续两个 model step 的完整例子，明确每步检查、满足触发后扫描、收益够才写入的三层；并写出缓存前缀可能失配、marker 重设与实际命中未知的边界。证据见 E31；Skill 的深度验收同步加入连续步骤与缓存权衡要求。
 - 用户指出仍不足以据描述复现实现。B5 的 02 进一步明确算法单位是**旧批次中合格 tool result 的整个 content**，无 preview/头尾保留/中间裁剪；新增保持源码判定顺序的伪代码，以及能算出 `867` token 节省的假设输入。E32 记录参数和回写证据；Skill 验收改为“熟悉 Agent 开发的读者可据此实现同样行为”。
+
+## 主动深度复核与跨设备 handoff（2026-09-22）
+
+- 用户要求把上述粒度**主动扩展到其他相关专题**，不再等待逐段提醒，并将偏好持久保存。已写入[读者与深度约定](reader-contract.md)、Skill 核心流程和 continuity；后续设备先读此约定。
+- 已复核并修订 A1/A2/B1/B2/B3/B4：A1 补 busy/guide/queue/reject 的判定顺序；A2 补拓扑 level、并发组和按 ID 汇合；B1 补 Provider 投影步骤与 40 MiB 媒体选择；B2 修正 Auto/Reactive 摘要超窗和 manual 丢旧组的差异；B3 补 memory extraction 的 pending 合并/cursor 场景；B4 补通用 UTF-8 字节裁剪、artifact preview、POSIX Bash 与 pipe 双路径的小流程。证据见 E33/E34，Overview 与 synthesis 只回写受影响的系统结论。
+- 本轮文档例子仍是源码规则的假设性推演，没有启动目标 Agent/Provider，也未实测远端缓存或 artifact 生命周期。后续细化优先从用户新问题所在机制下手，并自动扫描相邻专题同类缺口；尚未以该新标准全量复核 owner/lease、子 Agent、Hook/Skill 全链路等未专题研究范围。
+- 验证结果：本轮 11 张研究图在本机 Chrome 中用仓库 Mermaid 完成解析及 SVG 渲染；Skill `quick_validate.py`、21 个 Markdown 文件的本地链接、`git diff --check`、`corepack pnpm typecheck` 均通过；`corepack pnpm lint` 退出 0，仍是 70 条既有 warning、0 error。研究仍未运行目标 Agent/Provider，修订质量尚待用户继续校准。研究目录的 [Skill 试用记录](skill-trial.md) 已把原“深入实现通过”更正为“初版不足、修订待复核”。

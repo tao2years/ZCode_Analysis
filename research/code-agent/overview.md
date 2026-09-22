@@ -131,13 +131,13 @@ sequenceDiagram
 
 证据 E03、E08–E10、E14。一个实际例子是工具错误：`state.error` 面向 UI/日志，`modelContent` 面向模型，两者可能不同；实现额外保存 modelContent 元数据用于冷恢复。不能读取 UI 错误文本就断言下一轮模型收到同样文本。[E10]
 
-压缩也跨越这些层：auto/reactive 先保留最近轮并摘要更早轮次，成功后先持久化隐藏 summary 与 CompactBoundary，再替换 runtime history；冷恢复从最后有效 boundary 选择 active history，并按 preserved segment 重插最近原文。旧 transcript 没有被物理删除。[E20]
+压缩也跨越这些层：auto/reactive 先保留最近的 **assistant-started group** 并摘要更早组；摘要请求超窗时可把更多最近组移到原文保留区，当前 Auto/Reactive 路径不使用“丢最旧组”兜底。成功后先持久化隐藏 summary 与 CompactBoundary，再替换 runtime history；冷恢复从最后有效 boundary 选择 active history，并按 preserved segment 重插最近原文。旧 transcript 没有被物理删除。[E20、E34]
 
 工具大结果也体现分层：进程采集层可能已限制 inline、tail 和磁盘文件，通用 ToolExecutor 再对 handler 生成的模型内容执行 truncate 或 artifact。模型看到 preview 与路径；冷恢复保留当时的 `modelContent`，不会自动把全文重新注入。[E22]
 
 项目 Memory 使用文件索引与按需读取：每次 Context 初始化只注入 `MEMORY.md` 索引，具体事实由模型按需 Read；成功 turn 后可由受限后台 Agent 根据 active durable messages 更新事实文件。写文件有先读后写、revision 检查和原子替换，减少陈旧覆盖；语义去重及跨 Runtime 事务一致性并非这套机制的保证。[E21、E25]
 
-Context 管理是多级策略：Skills metadata 与 Memory index 控制常驻内容，完整正文按需读取；每步请求有输出 preflight、Provider usage/估算驱动的自动压缩、独立 40 MiB 媒体预算和 Provider cache marker。不同预算的单位与所有者不同，不能合并为一个“token 裁剪器”。详见[上下文管理全貌](topics/b-context-management.md)。[E27]
+Context 管理是多级策略：Skills metadata 与 Memory index 控制常驻内容，完整正文按需读取；每步请求有输出 preflight、Provider usage/估算驱动的自动压缩、独立 40 MiB 媒体预算和 Provider cache marker。媒体预算保护最新真实用户附件，其余按从新到旧的完整媒体块选择，放不下的块变文字占位；Microcompact 则按旧合格工具批次整条替换结果，两者都不是在一条内容中间按 Token 切片。不同预算的单位与所有者不能合并为一个“token 裁剪器”。详见[上下文管理全貌](topics/b-context-management.md)。[E27、E32、E34]
 
 Microcompact 清的是运行时历史和本轮请求中的旧工具结果，不回写 Session 的原 tool part；冷恢复重新从持久消息 hydrate，但若已有完整 compact boundary，仍按有效历史选择。跨会话上下文又有独立入口：`#sess_*` 只触发读取提示，需要时由 `ReadSessionContext` 按需从另一 Session 的持久记录提取；这与 Project Memory 的跨会话事实索引是两种机制。`model-io` JSONL 是有界诊断投影，不是 Session 恢复源。[E28、E29]
 
